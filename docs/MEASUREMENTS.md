@@ -121,14 +121,44 @@ transition. A dedicated page-crossing rung was run for exactly that reason and
 it passed at 932, 1832, and a decode-time crossing. See the page-transition
 section below. The ladder stands.
 
-Two limits keep it out of the leaderboard as a ranked row. First, this ladder
-ran at `max-model-len` 8192 while every MTP ladder above ran at 65536, so the
-15.61 mean and the 17.29 MTP k=2 mean sit on different attention page sizes.
-That is the same confound the README's ranking methodology exists to avoid, and
-it runs in both directions here. Second, acceptance tracks workload
-predictability far more sharply than MTP does: 79.27% on structured against
-26.31% on prose, a spread of 53 points, where MTP k=4 spanned 91.3% to 31.7%.
-A same-context MTP k=2 ladder at 8192 is the remaining measurement.
+### DFlash k=3 against MTP k=2 at matched context
+
+The ladder above ran at 8192 while every MTP ladder ran at 65536, so it could
+not be ranked against MTP without mixing attention page size into the result.
+An MTP k=2 ladder was therefore run at 8192, matched on context, batched
+tokens, GPU memory utilisation, chat template, harness settings and completion
+length. The speculative method is the only variable.
+
+| Workload | MTP k=2 | DFlash k=3 | MTP delta | MTP accept | DFlash accept |
+|---|---:|---:|---:|---:|---:|
+| prose | **14.8806** | 12.1284 | +22.7% | 54.7% | 26.3% |
+| structured | 20.4476 | **22.5627** | -9.4% | 97.1% | 79.3% |
+| code | **15.9834** | 13.2316 | +20.8% | 64.6% | 32.5% |
+| math | **16.7781** | 14.5249 | +15.5% | 70.9% | 40.3% |
+| arithmetic mean | **17.0224** | 15.6119 | +9.0% | | |
+
+MTP k=2 wins the mean by 9.0% and wins three of four workloads outright. DFlash
+k=3 wins structured by 9.4%, and it wins there **despite lower acceptance**,
+79.3% against 97.1%, because k=3 proposes a deeper draft: 3.38 verified tokens
+per step against 2.94. That is the same shape as the MTP depth ladder, where
+k=4 also won structured and lost everywhere else. Deeper speculation pays only
+where output is highly predictable.
+
+This also retires the context caveat. MTP k=2 measures 17.0224 at 8k against
+17.2911 at 64k, a 1.6% difference, so page size was never carrying the earlier
+cross-context comparison. The DFlash deficit is real and it is not an artifact
+of the 8k-versus-64k mismatch.
+
+**Conclusion: DFlash2 does not displace native MTP k=2 on this pack.** It needs
+a sidecar checkpoint, an EAGLE3 auxiliary-state patch, a mixed-cache planner,
+and a Triton-only draft attention backend, and it still ends up 9.0% slower on
+the mean. It is worth keeping only for rigid schema workloads, and even there
+MTP k=4 reaches 26.21 tok/s at 64k against DFlash's 22.56.
+
+One property of DFlash is worth recording anyway: its acceptance spread across
+workloads is far wider than MTP's, 26.3% to 79.3% against MTP's 54.7% to 97.1%.
+A speculator whose acceptance collapses on prose is a poor default even when
+its mean looks competitive.
 
 The `scheduled_spec_decode_tokens=[-1, ...]` values in the scheduler failure
 dump are intentional shape padding for the first speculative-shaped step. They
