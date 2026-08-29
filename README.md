@@ -1,0 +1,303 @@
+# GLM-5.3-Flash EXL3 K2 on one NVIDIA DGX Spark
+
+Reproducible **vLLM** recipe for **[vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2)** on a **single NVIDIA DGX Spark / GB10 (SM121)**.
+
+Install vLLM yourself, download the Hub pack, run `vllm serve`. A convenience script is in [`scripts/serve_one_spark.sh`](scripts/serve_one_spark.sh). This is **not** a container image and it does **not** redistribute weights.
+
+> Independent community engineering. Not affiliated with or endorsed by Z.ai, NVIDIA, or vLLM.
+
+| What | Where |
+|---|---|
+| Pack | [vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2) |
+| Source | [zai-org/GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash) BF16 |
+| Engine | vLLM, `--quantization exl3`, TP=1 |
+| Spec | **native MTP k=2** (in the checkpoint). Do not mix with a DFlash sidecar |
+
+Jump: [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) · [Download](#2-download-the-pack) · [Serve](#3-serve) · [Smoke](#4-identity-smoke) · [Speed](#speed-leaderboard-same-prompt) · [Sixcat](#sixcat-051) · [Pitfalls](#failures-already-paid-for)
+
+---
+
+## Headline (what is verified)
+
+Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed `/v1/chat/completions`, thinking **off**, 128 completion tokens, `max-num-seqs 1`. Speed ranks at **8k** ctx. The 91 GiB load is ~12 minutes per boot.
+
+| Item | Value |
+|---|---|
+| Architecture | `Glm5NextForConditionalGeneration` |
+| Pack | EXL3 **bits=2**, codebook **mcg**, routed experts only (288 local). Attn / shared / embed / head / vision stay native BF16 |
+| Shards | **120/120**, **97,728,721,536 B (91.017 GiB)** |
+| Hardware | DGX Spark GB10, SM121, TP=1 |
+| Quant flag | `--quantization exl3` |
+| MoE | `EXL3_FUSED_MOE=1` (log must show `fused_moe=exl3_moe`). **Do not** pass `--moe-backend marlin` |
+| KV | `--kv-cache-dtype fp8` |
+| Decode winner | **MTP k=2: 15.7–16.5 tok/s**, mean accept **~2.2**, pos1 ~74–83% / pos2 ~44% |
+| No-spec floor | **9.6–9.8 tok/s** (same flags, no spec) |
+| sixcat 0.5.1 | 120/120 think-on — **overall 84.2 is flagged**, see below |
+
+This pack is **2-bit experts on one Spark**. It is not a 4-bit two-node kit and it will not match those tok/s numbers.
+
+---
+
+## Prove the pack is packed
+
+`config.json` must contain:
+
+```text
+quantization_config.quant_method = exl3
+quantization_config.bits = 2
+quantization_config.codebook = mcg
+```
+
+Load log that means the fused path is live (repeats per layer):
+
+```text
+EXL3 MCG trellis engaged for routed experts: bits=2 experts_local=288 ... fused_moe=exl3_moe
+```
+
+If you see a per-expert `LinearEXL3` loop, `EXL3_FUSED_MOE` is off. If vLLM raises `bits not in (3, 4, 5, 6)`, run [`scripts/patch_exl3_bits2.py`](scripts/patch_exl3_bits2.py).
+
+---
+
+## Quick start
+
+### 1. Install vLLM
+
+Use a **real vLLM** (pip or from source). A one-off Python generate script is not a valid eval/serve backend.
+
+GB10 needs CUDA arch **12.1 / 12.1a**. Some PyTorch wheels stop at 12.0 — confirm SM121 before you assume the install is correct.
+
+```bash
+python3 -m venv ~/venvs/vllm-exl3
+source ~/venvs/vllm-exl3/bin/activate
+python -m pip install -U pip
+
+# Follow https://docs.vllm.ai for your platform, then:
+#   pip install vllm
+# or from source on GB10:
+#   export TORCH_CUDA_ARCH_LIST=12.1a FLASHINFER_CUDA_ARCH_LIST=12.1a MAX_JOBS=8
+#   pip install -e .
+
+python - <<'PY'
+import vllm
+print("vllm", vllm.__version__)
+from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
+assert "exl3" in QUANTIZATION_METHODS or "exl3" in {str(x) for x in QUANTIZATION_METHODS}
+print("exl3 method registered")
+PY
+```
+
+Your build must:
+
+- accept `--quantization exl3`
+- resolve `Glm5NextForConditionalGeneration`
+- ship GLM tool/reasoning parsers (`glm47` / `glm45`) used below
+- run on SM121
+
+If `exl3` is missing, you are on the wrong vLLM. Do not fake it with a custom generate loop.
+
+Optional one-line loader fix after install:
+
+```bash
+python scripts/patch_exl3_bits2.py
+```
+
+### 2. Download the pack
+
+[`scripts/download_weights.sh`](scripts/download_weights.sh):
+
+```bash
+hf download vcruz305/GLM-5.3-Flash-EXL3-K2 \
+  --local-dir ~/models/GLM-5.3-Flash-EXL3-K2
+```
+
+Last path component **must** be the Hub basename. No `KEEP` / `HOLD` / `STASH`.  
+`hf download` resumes via `--local-dir`. There is **no** `--resume-download` flag (it errors). Never `--force-download` a partial dest.
+
+Expect **120** `*.safetensors` and **97,728,721,536** bytes.
+
+### 3. Serve
+
+[`scripts/serve_one_spark.sh`](scripts/serve_one_spark.sh) (winner flags):
+
+```bash
+export EXL3_FUSED_MOE=1
+export TORCH_CUDA_ARCH_LIST=12.1a
+export VLLM_ATTENTION_BACKEND=FLASH_ATTN
+
+vllm serve ~/models/GLM-5.3-Flash-EXL3-K2 \
+  --served-model-name GLM-5.3-Flash-EXL3 \
+  --host 0.0.0.0 --port 8888 \
+  --tensor-parallel-size 1 \
+  --quantization exl3 \
+  --tool-call-parser glm47 \
+  --enable-auto-tool-choice \
+  --reasoning-parser glm45 \
+  --enable-prefix-caching \
+  --no-enable-flashinfer-autotune \
+  --max-model-len 8192 \
+  --gpu-memory-utilization 0.87 \
+  --max-num-seqs 1 \
+  --max-num-batched-tokens 2048 \
+  --kv-cache-dtype fp8 \
+  --skip-mm-profiling \
+  --limit-mm-per-prompt '{"image":4,"video":1}' \
+  --speculative-config '{"method":"mtp","num_speculative_tokens":2}' \
+  --cudagraph-capture-sizes 1 2 3 4 6 8 12
+```
+
+| Flag | Why |
+|---|---|
+| `--quantization exl3` | This pack is EXL3, not NVFP4 / GPTQ / compressed-tensors |
+| `EXL3_FUSED_MOE=1` | fused `exl3_moe` decode. `0` falls back to a per-expert loop |
+| **no marlin** | MoE backend stays auto. Marlin is the wrong kernel class here |
+| `--kv-cache-dtype fp8` | measured KV path on GB10 |
+| `--max-num-seqs 1` | keep 1 with spec. `np>1` + long draft garbles |
+| MTP k=2 | native heads in this checkpoint. Capture sizes must include **3** |
+| `--skip-mm-profiling` | vision stays **on**; skip only the MM profile pass |
+| 8k first | leftover UMA after 91 GiB is tens of GiB, not 900k ctx |
+
+No-spec (baseline): `MTP_TOKENS=0 bash scripts/serve_one_spark.sh`  
+Think-on eval ctx: `MTP_TOKENS=2 MAX_MODEL_LEN=65536 GPU_MEM_UTIL=0.91 bash scripts/serve_one_spark.sh`
+
+**Never** pass MTP and a DFlash draft on the same server.
+
+Weight reload is ~12 minutes. Treat a flag flip as a new boot.
+
+### 4. Identity smoke
+
+```bash
+curl -s http://127.0.0.1:8888/health
+curl -s http://127.0.0.1:8888/v1/models
+# id must be GLM-5.3-Flash-EXL3, max_model_len matches the flag
+
+curl -s http://127.0.0.1:8888/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"GLM-5.3-Flash-EXL3","messages":[{"role":"user","content":"Reply with exactly: pong"}],"max_tokens":8,"temperature":0,"chat_template_kwargs":{"enable_thinking":false}}'
+# content: pong, completion_tokens: 2
+```
+
+TPS:
+
+```bash
+python scripts/bench_v1.py --base-url http://127.0.0.1:8888/v1
+# run twice; quote the warm row
+```
+
+Spec metrics (engine log): `SpecDecoding metrics: Mean acceptance length: … Per-position acceptance rate: …`
+
+---
+
+## Speed leaderboard (same prompt)
+
+Thinking off, 128 gen, 8k, fused MoE on, seqs=1, KV fp8.
+
+| Config | Decode tok/s | Accept |
+|---|---:|---|
+| no spec (batched 1024) | 9.77 | — |
+| no spec (batched 2048 + FLASH_ATTN) | 9.63 | — |
+| DFlash sidecar k=7 | 11.5 | mean ~1.8 / 7, 11–18% draft |
+| DFlash sidecar k=3 | 12.8 | mean ~1.8 / 3, ~27% draft |
+| MTP k=1 | 14.8 | 76–80% |
+| **MTP k=2, batched 2048** | **15.7–16.5** | **~74/44%, mean ~2.2** |
+| MTP k=2, batched 4096 | 15.6 | wash |
+
+DFlash2 (`incoai/GLM-5.3-Flash-DFlash2`, 5-layer Qwen3, ~2.18 GiB) was trained on **full** GLM-5.3-Flash logits. Against this **K2** teacher it rejects. Native MTP matches the pack. Quantizing the DFlash sidecar does not fix that, and the stock DFlash2 loader in this vLLM path hardcodes `quant_config=None`.
+
+vLLM warning: `num_speculative_tokens > 1` reruns the **same** MTP layer. k=2 still beat k=1 on tok/s. k=3 was not worth another 12-minute reload.
+
+### KV (util 0.87 unless noted)
+
+| max_model_len | spec | GPU KV tokens |
+|---:|---|---:|
+| 8192 | none | 192,139 (~23×) |
+| 8192 | DFlash k=7 | **15,281** (draft KV collapse) |
+| 16384 | DFlash, util 0.91 | 45,095 |
+| 32768 | DFlash, util 0.91 | 90,035 (attention block 7168 — skip for speed ranks) |
+| 8192 | MTP k=2 | 104,857 (~12.8×) |
+| **65536** | MTP k=2, util 0.91 | **786,432** (12×) — sixcat think-on |
+
+---
+
+## sixcat 0.5.1
+
+[`scripts/run_sixcat.sh`](scripts/run_sixcat.sh). HTTP `/v1` only. Do not point sixcat at an agent/harness stdio.
+
+```bash
+python -m sixcat \
+  --base-url http://127.0.0.1:8888/v1 \
+  --model GLM-5.3-Flash-EXL3 \
+  --policy vendor --policy-family glm-5.x \
+  --thinking on --limit 20 --max-minutes 0 \
+  --request-timeout 1800 --ctx 65536 --concurrency 1 \
+  --transport openai --no-resume
+```
+
+`--limit 20` is **20 per category** (~120), not 20 total. Serve at **64k** so think-on budgets fit (knowledge 8192 / math 16384 / instruct+code 32768).
+
+Two sixcat-side edits required on this vLLM:
+
+1. glm-5.x `stop` list is 6 strings. vLLM OpenAI schema allows **4**. Trim to `<|user|> <|end|> <|eot|> <|endoftext|>`.
+2. glm-5.x `preclose_think: true` **forces** `enable_thinking=false` in `chat_template_kwargs`. Set it **false** or you are scoring answer-mode while the receipt says thinking on.
+
+### Measured receipt (2026-08-29) — flagged overall
+
+Parser v4, host-guarded HumanEval, selection `challenge-v1` / `05c04833fcdb`, fingerprint `f63dd8393f13`, 120/120, not timed out.
+
+| Category | Score | n | trunc | loop |
+|---|---:|---:|---:|---:|
+| knowledge | 65.0 | 20 | 0 | 0 |
+| math | **100.0** | 20 | 0 | 0 |
+| truth | 85.0 | 20 | 0 | 0 |
+| instruct | 75.0 | 20 | **1** | **1** |
+| code | 90.0 | 20 | 0 | 0 |
+| tools | 90.0 | 20 | 0 | 0 |
+
+**overall[vendor] 84.2** flags: `truncated:instruct`, `trunc-in-think:instruct`, `loop-failures:instruct` (`ifeval:1300` hit 32768 tokens, empty answer). **Do not quote 84.2 as a clean overall.**
+
+Wall: 57 191 ctok / 3470 s → suite **16.5 tok/s**. Prefill/decode TPS n/a. `rtok`/`atok` n/a (engine omitted `reasoning_tokens`).
+
+---
+
+## Failures already paid for
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `bits not in (3, 4, 5, 6)` | EXL3 loader allowlist | `python scripts/patch_exl3_bits2.py` |
+| ~11 tok/s with DFlash, accept ~1.8 | DFlash2 vs K2 logits | native MTP k=2 |
+| 9.8 tok/s “must be a missing kernel” | that **is** the no-spec floor | fused MoE already on |
+| DFlash KV 15k @ 8k | draft KV slot-share | util 0.91 before climbing ctx |
+| HTTP 400 `stop` list too long | vLLM max 4 stops | trim glm-5.x extra.stop |
+| 2-token sixcat rows, `enable_thinking` in the journal | `preclose_think` | set false |
+| 12 minutes per A/B | 91 GiB reload | expect it; don’t chain silent retunes |
+| `hf --resume-download` | flag does not exist | `--local-dir` only |
+| marlin MoE | wrong backend on this EXL3 pack | omit |
+
+---
+
+## Hardware (measured box)
+
+```text
+GPU:     NVIDIA GB10
+Arch:    SM121
+Memory:  ~121 GiB unified
+Engine:  vLLM --quantization exl3, EXL3_FUSED_MOE=1
+```
+
+Single Spark. Occupancy is compute-app **plus** VRAM, not 0% util.
+
+---
+
+## Reproducibility boundary
+
+This repo documents **one measured configuration**. It does not claim:
+
+- 16 tok/s is the GB10 ceiling for every vLLM build
+- DFlash2 will ever match MTP on this 2-bit pack
+- 84.2 is an untruncated sixcat overall
+- pip `vllm` without EXL3 / Glm5Next / SM121 is sufficient
+
+---
+
+## License / attribution
+
+MIT for the scripts and notes in this repo. Weights are **not** redistributed — pull them from Hugging Face and respect the GLM-5.3-Flash license. vLLM, ExLlama EXL3, FlashInfer, and sixcat-eval have their own licenses.

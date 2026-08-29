@@ -1,0 +1,11 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+results/
+models/
+*.jsonl
+.env
+.hf-token
+*.safetensors
+*.gguf
