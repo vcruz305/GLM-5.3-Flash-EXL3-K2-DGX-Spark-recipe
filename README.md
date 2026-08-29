@@ -2,7 +2,7 @@
 
 Reproducible **vLLM** recipe for **[vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2)** on a **single NVIDIA DGX Spark / GB10 (SM121)**.
 
-Install vLLM and ExLlamaV3 in a local virtual environment on the Spark, download the Hub pack, and run `vllm serve` directly. A convenience script is in [`scripts/serve_one_spark.sh`](scripts/serve_one_spark.sh).
+Install the prebuilt runtime, download the Hub pack, and run `vllm serve`. Start with `python scripts/preflight.py`; it takes a second and tells you what is missing. Agents should read [`AGENTS.md`](AGENTS.md) first.
 
 > Independent community engineering. Not affiliated with or endorsed by Z.ai, NVIDIA, or vLLM.
 
@@ -13,7 +13,7 @@ Install vLLM and ExLlamaV3 in a local virtual environment on the Spark, download
 | Engine | vLLM, `--quantization exl3`, TP=1 |
 | Spec | **native MTP k=2** (in the checkpoint). Do not mix with a DFlash sidecar |
 
-Jump: [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) · [Download](#2-download-the-pack) · [Serve](#3-serve) · [Smoke](#4-identity-smoke) · [Speed](#speed-leaderboard-same-prompt) · [Why 8k](#why-speed-ranks-are-at-8k) · [Ctx ladder](#context-ladder) · [Sixcat](#sixcat-051) · [Pitfalls](#failures-already-paid-for)
+Jump: **[Agent instructions](AGENTS.md)** · [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) · [Download](#2-download-the-pack) · [Serve](#3-serve) · [Smoke](#4-identity-smoke) · [Speed](#speed-leaderboard-same-prompt) · [Why 8k](#why-speed-ranks-are-at-8k) · [Ctx ladder](#context-ladder) · [Sixcat](#sixcat-051) · [Pitfalls](#failures-already-paid-for)
 
 ---
 
@@ -62,40 +62,56 @@ If you see a per-expert `LinearEXL3` loop, `EXL3_FUSED_MOE` is off. The local pl
 
 ## Quick start
 
-### 1. Install vLLM
+### 1. Install the runtime
 
-Use the pinned source build. It installs into a normal virtual environment and
-runs directly on the Spark; no prebuilt runtime bundle is required.
+> **Do not `pip install vllm`.** Stock vLLM has neither the `exl3` quantization
+> method nor the `Glm5Next` architecture, and no flag turns them on. Both come
+> from the runtime below. Installing stock vLLM is the single most expensive
+> mistake with this recipe: it fails only after a 91 GiB download.
 
-The tested prerequisite is CUDA 13 PyTorch (`torch 2.13.0+cu130`,
-`torchvision 0.28.0+cu130`) in `~/venvs/glm53-exl3-local`. Both wheels are on
-PyTorch's official CUDA 13.0 index:
+Check the machine first. This takes about a second and tells you exactly what is
+missing:
+
+```bash
+python scripts/preflight.py
+```
+
+Then install the prebuilt runtime. Wheels, no compiler, minutes:
+
+```bash
+bash scripts/install_prebuilt.sh
+```
+
+That installs CUDA 13 PyTorch if needed, the patched vLLM and ExLlamaV3 wheels,
+FlashInfer, and the routed-expert EXL3 plugin, then reruns preflight. The wheels
+are `aarch64` + Python 3.12 + CUDA 13 and carry compiled CUDA extensions, so they
+are not portable to another architecture or Python minor version.
+
+<details>
+<summary>Building from source instead (only if you are changing the patches)</summary>
+
+`scripts/install_local_runtime.sh` builds the same runtime from the pinned vLLM
+and ExLlamaV3 revisions, applies the SM121 NoPE sparse-MLA and DFlash
+auxiliary-state fixes, and installs the plugin. Budget tens of minutes at best
+and hours on a cold machine; the vLLM build alone was about 22 minutes with
+`MAX_JOBS=12`.
 
 ```bash
 python3 -m venv ~/venvs/glm53-exl3-local
 ~/venvs/glm53-exl3-local/bin/python -m pip install --upgrade pip
-~/venvs/glm53-exl3-local/bin/python -m pip install \
-  --index-url https://download.pytorch.org/whl/cu130 \
-  torch==2.13.0+cu130 torchvision==0.28.0+cu130
+~/venvs/glm53-exl3-local/bin/python -m pip install   --index-url https://download.pytorch.org/whl/cu130   torch==2.13.0+cu130 torchvision==0.28.0+cu130
 
-VENV=~/venvs/glm53-exl3-local \
-  bash scripts/install_local_runtime.sh
-
-source ~/venvs/glm53-exl3-local/bin/activate
-python scripts/verify_runtime.py
+VENV=~/venvs/glm53-exl3-local bash scripts/install_local_runtime.sh
 ```
-
-The installer pins the measured vLLM and ExLlamaV3 revisions, builds for
-SM121, applies the NoPE sparse-MLA and DFlash auxiliary-state fixes, installs
-the DFlash2 selective-draft-quantization guard, installs the out-of-tree
-routed-expert EXL3 plugin, and verifies the fused
-`exllamav3_ext.exl3_moe` entry point. The vLLM build took about 22 minutes with
-`MAX_JOBS=12`; loading this checkpoint still takes about 11–12 minutes per
-server boot.
 
 Do not set `VLLM_ATTENTION_BACKEND` globally on this branch. Backend selection
 must remain per module: sparse FlashInfer MLA for the target and FlashAttention
 for vision/DFlash.
+
+</details>
+
+Loading the checkpoint takes about 11 to 12 minutes per server boot regardless of
+how the runtime was installed. That is the 91 GiB, not a hang.
 
 ### 2. Download the pack
 
@@ -295,7 +311,7 @@ Wall: 57 191 ctok / 3470 s → suite **16.5 tok/s**. Prefill/decode TPS n/a.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| EXL3 is absent from vLLM's registry | local plugin was not installed/loaded | rerun `scripts/install_local_runtime.sh`, then `scripts/verify_runtime.py` |
+| EXL3 is absent from vLLM's registry | stock vLLM was installed, or the plugin did not load | `python scripts/preflight.py`, then `bash scripts/install_prebuilt.sh`. Stock vLLM can never work here |
 | ~11 tok/s with DFlash, accept ~1.8 | DFlash2 vs K2 logits | native MTP k=2 |
 | 9.8 tok/s “must be a missing kernel” | that **is** the no-spec floor | fused MoE already on |
 | DFlash KV 15k @ 8k | draft KV slot-share | util 0.91 before climbing ctx |

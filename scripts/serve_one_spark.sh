@@ -66,7 +66,21 @@ if [[ -n "$GLM_DFLASH_MANAGER_BLOCK_SIZE" ]]; then
 fi
 
 if ! command -v vllm >/dev/null 2>&1 && ! python3 -c "import vllm" >/dev/null 2>&1; then
-  echo "vLLM is not on PATH / not importable. Create a venv and install vLLM first (see README)."
+  cat >&2 <<'MSG'
+vLLM is not importable in this environment.
+
+Do NOT run `pip install vllm`. Stock vLLM cannot serve this pack: it has
+neither the EXL3 quantization method nor the Glm5Next architecture, and no
+command-line flag turns them on. Both come from this recipe's runtime.
+
+Install the prebuilt runtime instead (minutes, no compiler):
+
+    bash scripts/install_prebuilt.sh
+
+Then confirm before going further:
+
+    python scripts/preflight.py
+MSG
   exit 1
 fi
 
