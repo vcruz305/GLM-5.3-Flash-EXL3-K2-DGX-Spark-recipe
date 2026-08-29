@@ -36,7 +36,7 @@ Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed 
 | Max `max-model-len` allocated | **65536** (MTP k=2, util 0.91, KV **786,432**, 12×). 128k not tried |
 | sixcat 0.5.1 | 120/120 think-on at 64k — **overall 84.2 is flagged**, see below |
 
-This pack is **2-bit experts on one Spark**. It is not a 4-bit two-node kit and it will not match those tok/s numbers.
+This recipe is scoped to **2-bit routed experts on one Spark**.
 
 ---
 
@@ -56,7 +56,7 @@ Load log that means the fused path is live (repeats per layer):
 EXL3 MCG trellis engaged for routed experts: bits=2 experts_local=288 ... fused_moe=exl3_moe
 ```
 
-If you see a per-expert `LinearEXL3` loop, `EXL3_FUSED_MOE` is off. If vLLM raises `bits not in (3, 4, 5, 6)`, run [`scripts/patch_exl3_bits2.py`](scripts/patch_exl3_bits2.py).
+If you see a per-expert `LinearEXL3` loop, `EXL3_FUSED_MOE` is off. The local plugin in this repo natively accepts the pack's 2-bit MCG tensors.
 
 ---
 
@@ -64,44 +64,38 @@ If you see a per-expert `LinearEXL3` loop, `EXL3_FUSED_MOE` is off. If vLLM rais
 
 ### 1. Install vLLM
 
-Use a **real vLLM** (pip or from source). A one-off Python generate script is not a valid eval/serve backend.
+Use the pinned source build. It installs into a normal virtual environment and
+runs directly on the Spark; no prebuilt runtime bundle is required.
 
-GB10 needs CUDA arch **12.1 / 12.1a**. Some PyTorch wheels stop at 12.0 — confirm SM121 before you assume the install is correct.
-
-```bash
-python3 -m venv ~/venvs/vllm-exl3
-source ~/venvs/vllm-exl3/bin/activate
-python -m pip install -U pip
-
-# Follow https://docs.vllm.ai for your platform, then:
-#   pip install vllm
-# or from source on GB10:
-#   export TORCH_CUDA_ARCH_LIST=12.1a FLASHINFER_CUDA_ARCH_LIST=12.1a MAX_JOBS=8
-#   pip install -e .
-
-python - <<'PY'
-import vllm
-print("vllm", vllm.__version__)
-from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
-assert "exl3" in QUANTIZATION_METHODS or "exl3" in {str(x) for x in QUANTIZATION_METHODS}
-print("exl3 method registered")
-PY
-```
-
-Your build must:
-
-- accept `--quantization exl3`
-- resolve `Glm5NextForConditionalGeneration`
-- ship GLM tool/reasoning parsers (`glm47` / `glm45`) used below
-- run on SM121
-
-If `exl3` is missing, you are on the wrong vLLM. Do not fake it with a custom generate loop.
-
-Optional one-line loader fix after install:
+The tested prerequisite is CUDA 13 PyTorch (`torch 2.13.0+cu130`,
+`torchvision 0.28.0+cu130`) in `~/venvs/glm53-exl3-local`. Both wheels are on
+PyTorch's official CUDA 13.0 index:
 
 ```bash
-python scripts/patch_exl3_bits2.py
+python3 -m venv ~/venvs/glm53-exl3-local
+~/venvs/glm53-exl3-local/bin/python -m pip install --upgrade pip
+~/venvs/glm53-exl3-local/bin/python -m pip install \
+  --index-url https://download.pytorch.org/whl/cu130 \
+  torch==2.13.0+cu130 torchvision==0.28.0+cu130
+
+VENV=~/venvs/glm53-exl3-local \
+  bash scripts/install_local_runtime.sh
+
+source ~/venvs/glm53-exl3-local/bin/activate
+python scripts/verify_runtime.py
 ```
+
+The installer pins the measured vLLM and ExLlamaV3 revisions, builds for
+SM121, applies the NoPE sparse-MLA and DFlash auxiliary-state fixes, installs
+the DFlash2 selective-draft-quantization guard, installs the out-of-tree
+routed-expert EXL3 plugin, and verifies the fused
+`exllamav3_ext.exl3_moe` entry point. The vLLM build took about 22 minutes with
+`MAX_JOBS=12`; loading this checkpoint still takes about 11–12 minutes per
+server boot.
+
+Do not set `VLLM_ATTENTION_BACKEND` globally on this branch. Backend selection
+must remain per module: sparse FlashInfer MLA for the target and FlashAttention
+for vision/DFlash.
 
 ### 2. Download the pack
 
@@ -117,34 +111,25 @@ Last path component **must** be the Hub basename. No `KEEP` / `HOLD` / `STASH`.
 
 Expect **120** `*.safetensors` and **97,728,721,536** bytes.
 
-### 3. Serve
-
-[`scripts/serve_one_spark.sh`](scripts/serve_one_spark.sh) (winner flags):
+Optional DFlash2 ladder checkpoint:
 
 ```bash
-export EXL3_FUSED_MOE=1
-export TORCH_CUDA_ARCH_LIST=12.1a
-export VLLM_ATTENTION_BACKEND=FLASH_ATTN
+bash scripts/download_dflash2.sh
+```
 
-vllm serve ~/models/GLM-5.3-Flash-EXL3-K2 \
-  --served-model-name GLM-5.3-Flash-EXL3 \
-  --host 0.0.0.0 --port 8888 \
-  --tensor-parallel-size 1 \
-  --quantization exl3 \
-  --tool-call-parser glm47 \
-  --enable-auto-tool-choice \
-  --reasoning-parser glm45 \
-  --enable-prefix-caching \
-  --no-enable-flashinfer-autotune \
-  --max-model-len 8192 \
-  --gpu-memory-utilization 0.87 \
-  --max-num-seqs 1 \
-  --max-num-batched-tokens 2048 \
-  --kv-cache-dtype fp8 \
-  --skip-mm-profiling \
-  --limit-mm-per-prompt '{"image":4,"video":1}' \
-  --speculative-config '{"method":"mtp","num_speculative_tokens":2}' \
-  --cudagraph-capture-sizes 1 2 3 4 6 8 12
+### 3. Serve
+
+Patch the model-provided template once, activate the local runtime, and launch
+exactly one speculative method:
+
+```bash
+source ~/venvs/glm53-exl3-local/bin/activate
+python scripts/patch_chat_template_thinking.py \
+  ~/models/GLM-5.3-Flash-EXL3-K2/chat_template.jinja
+
+# Current default: native MTP k=2 at the speed-ranking context.
+SPEC_METHOD=mtp MTP_TOKENS=2 MAX_MODEL_LEN=8192 GPU_MEM_UTIL=0.87 \
+  bash scripts/serve_one_spark.sh
 ```
 
 | Flag | Why |
@@ -158,8 +143,28 @@ vllm serve ~/models/GLM-5.3-Flash-EXL3-K2 \
 | `--skip-mm-profiling` | vision stays **on**; skip only the MM profile pass |
 | 8k for spec A/B | hold page size while ranking MTP vs DFlash; climb ctx after. Max allocated: **64k** |
 
-No-spec (baseline): `MTP_TOKENS=0 bash scripts/serve_one_spark.sh`  
-Think-on eval ctx: `MTP_TOKENS=2 MAX_MODEL_LEN=65536 GPU_MEM_UTIL=0.91 bash scripts/serve_one_spark.sh`
+No-spec baseline:
+
+```bash
+SPEC_METHOD=none MAX_MODEL_LEN=8192 GPU_MEM_UTIL=0.87 \
+  bash scripts/serve_one_spark.sh
+```
+
+DFlash2 BF16 and draft-only online FP8 use the same target process; the
+launcher selects FlashAttention for the non-causal draft and aligns its cache
+pages with the target's sparse-MLA allocation:
+
+```bash
+SPEC_METHOD=dflash DFLASH_TOKENS=3 \
+  DFLASH_DIR=~/models/GLM-5.3-Flash-DFlash2 \
+  bash scripts/serve_one_spark.sh
+
+SPEC_METHOD=dflash DFLASH_TOKENS=3 DFLASH_QUANTIZATION=fp8 \
+  DFLASH_DIR=~/models/GLM-5.3-Flash-DFlash2 \
+  bash scripts/serve_one_spark.sh
+```
+
+Think-on 64k MTP: `SPEC_METHOD=mtp MTP_TOKENS=2 MAX_MODEL_LEN=65536 GPU_MEM_UTIL=0.91 bash scripts/serve_one_spark.sh`
 
 **Never** pass MTP and a DFlash draft on the same server.
 
@@ -189,7 +194,7 @@ Spec metrics (engine log): `SpecDecoding metrics: Mean acceptance length: … Pe
 
 ---
 
-## Speed leaderboard (same prompt)
+## Historical 128-token speed leaderboard (older runtime)
 
 Thinking off, 128 gen, 8k, fused MoE on, seqs=1, KV fp8.
 
@@ -203,7 +208,7 @@ Thinking off, 128 gen, 8k, fused MoE on, seqs=1, KV fp8.
 | **MTP k=2, batched 2048** | **15.7–16.5** | **~74/44%, mean ~2.2** |
 | MTP k=2, batched 4096 | 15.6 | wash |
 
-DFlash2 (`incoai/GLM-5.3-Flash-DFlash2`, 5-layer Qwen3, ~2.18 GiB) was trained on **full** GLM-5.3-Flash logits. Against this **K2** teacher it rejects. Native MTP matches the pack. Quantizing the DFlash sidecar does not fix that, and the stock DFlash2 loader in this vLLM path hardcodes `quant_config=None`.
+DFlash2 (`incoai/GLM-5.3-Flash-DFlash2`, 5-layer Qwen3, ~2.18 GiB) had low acceptance against this K2 verifier in the older runtime. The current branch has a draft-only quantization field, so BF16 and online-FP8 DFlash are being remeasured rather than carrying the old loader conclusion forward. See [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md).
 
 vLLM warning: `num_speculative_tokens > 1` reruns the **same** MTP layer. k=2 still beat k=1 on tok/s. k=3 was not worth another 12-minute reload.
 
@@ -289,7 +294,7 @@ Wall: 57 191 ctok / 3470 s → suite **16.5 tok/s**. Prefill/decode TPS n/a.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `bits not in (3, 4, 5, 6)` | EXL3 loader allowlist | `python scripts/patch_exl3_bits2.py` |
+| EXL3 is absent from vLLM's registry | local plugin was not installed/loaded | rerun `scripts/install_local_runtime.sh`, then `scripts/verify_runtime.py` |
 | ~11 tok/s with DFlash, accept ~1.8 | DFlash2 vs K2 logits | native MTP k=2 |
 | 9.8 tok/s “must be a missing kernel” | that **is** the no-spec floor | fused MoE already on |
 | DFlash KV 15k @ 8k | draft KV slot-share | util 0.91 before climbing ctx |
