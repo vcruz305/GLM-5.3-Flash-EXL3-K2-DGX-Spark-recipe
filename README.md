@@ -13,13 +13,13 @@ Install vLLM yourself, download the Hub pack, run `vllm serve`. A convenience sc
 | Engine | vLLM, `--quantization exl3`, TP=1 |
 | Spec | **native MTP k=2** (in the checkpoint). Do not mix with a DFlash sidecar |
 
-Jump: [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) · [Download](#2-download-the-pack) · [Serve](#3-serve) · [Smoke](#4-identity-smoke) · [Speed](#speed-leaderboard-same-prompt) · [Sixcat](#sixcat-051) · [Pitfalls](#failures-already-paid-for)
+Jump: [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) · [Download](#2-download-the-pack) · [Serve](#3-serve) · [Smoke](#4-identity-smoke) · [Speed](#speed-leaderboard-same-prompt) · [Why 8k](#why-speed-ranks-are-at-8k) · [Ctx ladder](#context-ladder) · [Sixcat](#sixcat-051) · [Pitfalls](#failures-already-paid-for)
 
 ---
 
 ## Headline (what is verified)
 
-Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed `/v1/chat/completions`, thinking **off**, 128 completion tokens, `max-num-seqs 1`. Speed ranks at **8k** ctx. The 91 GiB load is ~12 minutes per boot.
+Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed `/v1/chat/completions`, thinking **off**, 128 completion tokens, `max-num-seqs 1`. **Spec A/B (none / DFlash / MTP) is ranked at 8k** so page size does not confound accept. **Max ctx that allocated:** MTP k=2 at **65536** (KV 786,432). See [Why 8k](#why-speed-ranks-are-at-8k) and [Ctx ladder](#context-ladder). The 91 GiB load is ~12 minutes per boot.
 
 | Item | Value |
 |---|---|
@@ -30,9 +30,11 @@ Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed 
 | Quant flag | `--quantization exl3` |
 | MoE | `EXL3_FUSED_MOE=1` (log must show `fused_moe=exl3_moe`). **Do not** pass `--moe-backend marlin` |
 | KV | `--kv-cache-dtype fp8` |
-| Decode winner | **MTP k=2: 15.7–16.5 tok/s**, mean accept **~2.2**, pos1 ~74–83% / pos2 ~44% |
-| No-spec floor | **9.6–9.8 tok/s** (same flags, no spec) |
-| sixcat 0.5.1 | 120/120 think-on — **overall 84.2 is flagged**, see below |
+| Decode winner @ 8k | **MTP k=2: 15.7–16.5 tok/s**, mean accept **~2.2**, pos1 ~74–83% / pos2 ~44% |
+| Same MTP @ 64k | **14.6–15.7 tok/s** (warm 14.6, TTFT 314 ms). Same winner — slightly slower pages |
+| No-spec floor @ 8k | **9.6–9.8 tok/s** |
+| Max `max-model-len` allocated | **65536** (MTP k=2, util 0.91, KV **786,432**, 12×). 128k not tried |
+| sixcat 0.5.1 | 120/120 think-on at 64k — **overall 84.2 is flagged**, see below |
 
 This pack is **2-bit experts on one Spark**. It is not a 4-bit two-node kit and it will not match those tok/s numbers.
 
@@ -154,7 +156,7 @@ vllm serve ~/models/GLM-5.3-Flash-EXL3-K2 \
 | `--max-num-seqs 1` | keep 1 with spec. `np>1` + long draft garbles |
 | MTP k=2 | native heads in this checkpoint. Capture sizes must include **3** |
 | `--skip-mm-profiling` | vision stays **on**; skip only the MM profile pass |
-| 8k first | leftover UMA after 91 GiB is tens of GiB, not 900k ctx |
+| 8k for spec A/B | hold page size while ranking MTP vs DFlash; climb ctx after. Max allocated: **64k** |
 
 No-spec (baseline): `MTP_TOKENS=0 bash scripts/serve_one_spark.sh`  
 Think-on eval ctx: `MTP_TOKENS=2 MAX_MODEL_LEN=65536 GPU_MEM_UTIL=0.91 bash scripts/serve_one_spark.sh`
@@ -205,16 +207,41 @@ DFlash2 (`incoai/GLM-5.3-Flash-DFlash2`, 5-layer Qwen3, ~2.18 GiB) was trained
 
 vLLM warning: `num_speculative_tokens > 1` reruns the **same** MTP layer. k=2 still beat k=1 on tok/s. k=3 was not worth another 12-minute reload.
 
-### KV (util 0.87 unless noted)
+---
 
-| max_model_len | spec | GPU KV tokens |
-|---:|---|---:|
-| 8192 | none | 192,139 (~23×) |
-| 8192 | DFlash k=7 | **15,281** (draft KV collapse) |
-| 16384 | DFlash, util 0.91 | 45,095 |
-| 32768 | DFlash, util 0.91 | 90,035 (attention block 7168 — skip for speed ranks) |
-| 8192 | MTP k=2 | 104,857 (~12.8×) |
-| **65536** | MTP k=2, util 0.91 | **786,432** (12×) — sixcat think-on |
+## Why speed ranks are at 8k
+
+The 8k table is **spec method A/B** (none vs DFlash k vs MTP k), not “this is the longest context we can run.”
+
+1. **Accept vs overhead.** DFlash vs MTP is a rejection-rate question. Holding `--max-model-len 8192` keeps attention page size in the same band (~6912 tokens) so a 2 tok/s delta is the speculator, not a different MLA page.
+2. **32k DFlash changed the page.** At 32k the engine set attention block **7168**. That is a different decode shape. Ranking DFlash k=3 vs MTP k=2 on that boot would mix page size into the result, so 32k was allocation-only.
+3. **Reload cost.** 91 GiB is ~12 minutes per `max-model-len` flip. Spec k A/B already burned several boots at 8k. Ctx climb was a second axis: allocate KV, smoke `/v1`, do not re-rank k.
+4. **Leftover UMA is tens of GiB, not a million tokens.** After 91 GiB weights, 64k MTP still fits (786k KV tokens). We did not chase a huge ctx number for the tok/s table.
+
+**Serve/eval ctx is 64k** (`GPU_MEM_UTIL=0.91`) so sixcat think-on budgets fit. That boot’s short-prompt decode is in the ladder below — it did **not** dethrone MTP k=2.
+
+---
+
+## Context ladder
+
+Same box, fused `exl3_moe`, seqs=1, KV fp8. **Decode tok/s** = `bench_v1.py` thinking off, 128 gen, warm row when present. Empty decode = we allocated KV and `/v1` pong’d, no 128-token bench on that boot.
+
+| max_model_len | spec | util | GPU KV tokens | conc. | `/v1` | Decode tok/s | Notes |
+|---:|---|---:|---:|---:|---|---:|---|
+| 8192 | none | 0.87 | 192,139 | 23.45× | pong | **9.77** | first boot, batched 1024 |
+| 8192 | none | 0.87 | 207,778 | 25.36× | pong | **9.63** | fair floor, batched 2048 + FLASH_ATTN |
+| 8192 | DFlash k=7 | 0.87 | **15,281** | 1.87× | pong | **11.5** | draft KV collapse |
+| 8192 | DFlash k=3 | 0.87 | (same class) | — | pong | **12.8** | best DFlash; still loses to MTP |
+| 16384 | DFlash k=7 | 0.91 | 45,095 | 2.75× | pong | *not benched* | 16k would not allocate at 15k KV / util 0.87 |
+| 32768 | DFlash k=7 | 0.91 | 90,035 | 2.75× | allocated | *not benched* | attention block **7168** — skip for spec ranking |
+| 8192 | MTP k=1 | 0.87 | — | — | pong | **14.8** | 76–80% accept |
+| 8192 | MTP k=2 | 0.87 | 104,857 | 12.80× | pong | **15.7–16.5** | **ranking winner** |
+| 8192 | MTP k=2 | 0.87 | 99,942 | 12.20× | pong | 15.6 | batched 4096 wash |
+| **65536** | MTP k=2 | 0.91 | **786,432** | **12.00×** | pong | **14.6–15.7** | sixcat think-on; warm 14.6 / TTFT 314 ms; accept ~71/35% on the warm window |
+
+Highest ctx **tried and allocated:** **65536**. **128k was not attempted.** DFlash at 8k cannot climb until util 0.91 because draft KV eats the pool.
+
+Do not quote sixcat suite TPS (16.5 wall across mixed think-on items) as a 64k decode-only number. The 64k decode row above is the same 128-token bench as 8k.
 
 ---
 
@@ -292,6 +319,9 @@ Single Spark. Occupancy is compute-app **plus** VRAM, not 0% util.
 This repo documents **one measured configuration**. It does not claim:
 
 - 16 tok/s is the GB10 ceiling for every vLLM build
+- 64k decode (14.6 tok/s warm) is a different spec winner than 8k — it is not
+- DFlash 16k/32k tok/s (those boots were `/v1` pong + KV only)
+- 128k fits (not attempted)
 - DFlash2 will ever match MTP on this 2-bit pack
 - 84.2 is an untruncated sixcat overall
 - pip `vllm` without EXL3 / Glm5Next / SM121 is sufficient
