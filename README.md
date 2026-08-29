@@ -19,7 +19,7 @@ Jump: [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) 
 
 ## Headline (what is verified)
 
-Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed `/v1/chat/completions`, thinking **off**, 128 completion tokens, `max-num-seqs 1`. **Spec A/B (none / DFlash / MTP) is ranked at 8k** so page size does not confound accept. **Max ctx that allocated:** MTP k=2 at **65536** (KV 786,432). See [Why 8k](#why-speed-ranks-are-at-8k) and [Ctx ladder](#context-ladder). The 91 GiB load is ~12 minutes per boot.
+Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed `/v1/chat/completions`, thinking **off**, 128 completion tokens, `max-num-seqs 1`. **Spec A/B (none / DFlash / MTP) is ranked at 8k** so page size does not confound accept. **Max ctx that allocated:** MTP k=2 at **131072** (KV 786,432), though a near-limit prompt faults there, so supported serving ctx is **65536**. See [Why 8k](#why-speed-ranks-are-at-8k) and [Ctx ladder](#context-ladder). The 91 GiB load is ~12 minutes per boot.
 
 | Item | Value |
 |---|---|
@@ -243,6 +243,7 @@ Same box, fused `exl3_moe`, seqs=1, KV fp8. **Decode tok/s** = `bench_v1.py` thi
 | 8192 | MTP k=2 | 0.87 | 104,857 | 12.80× | pong | **15.7–16.5** | **ranking winner** |
 | 8192 | MTP k=2 | 0.87 | 99,942 | 12.20× | pong | 15.6 | batched 4096 wash |
 | **65536** | MTP k=2 | 0.91 | **786,432** | **12.00×** | pong | **14.6–15.7** | sixcat think-on; warm 14.6 / TTFT 314 ms; accept ~71/35% on the warm window |
+| **131072** | MTP k=2 | 0.91 | **786,432** | **6.00×** | pong | *not benched* | allocates; 65,408-token prompt passes in 92.98 s; 130,944-token prompt faults and kills the engine |
 
 Highest ctx **tried and allocated:** **131072**, but a near-limit prompt faults in the EXL3 fused-MoE path, so **65536 remains the supported serving ctx**. See [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md). DFlash at 8k cannot climb until util 0.91 because draft KV eats the pool.
 
