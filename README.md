@@ -208,7 +208,7 @@ Thinking off, 128 gen, 8k, fused MoE on, seqs=1, KV fp8.
 | **MTP k=2, batched 2048** | **15.7–16.5** | **~74/44%, mean ~2.2** |
 | MTP k=2, batched 4096 | 15.6 | wash |
 
-DFlash2 (`incoai/GLM-5.3-Flash-DFlash2`, 5-layer Qwen3, ~2.18 GiB) had low acceptance against this K2 verifier in the older runtime. The current branch has a draft-only quantization field, so BF16 and online-FP8 DFlash are being remeasured rather than carrying the old loader conclusion forward. See [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md).
+DFlash2 (`incoai/GLM-5.3-Flash-DFlash2`, 5-layer Qwen3, ~2.18 GiB) was remeasured on the current runtime rather than carrying the old loader conclusion forward. It now runs correctly, but only with `TRITON_ATTN` draft attention; the FlashAttention draft path faults at its first cache page transition. At matched 8k context on the four-workload ladder, **DFlash k=3 reaches 15.61 tok/s against MTP k=2's 17.02**, losing prose, code and math and winning only structured. It does not displace native MTP. See [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md).
 
 vLLM warning: `num_speculative_tokens > 1` reruns the **same** MTP layer. k=2 still beat k=1 on tok/s. k=3 was not worth another 12-minute reload.
 
