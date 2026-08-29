@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Serve GLM-5.3-Flash EXL3 K2 with stock vLLM on one DGX Spark (GB10).
+# Serve GLM-5.3-Flash EXL3 K2 from a local vLLM + ExLlamaV3 installation on one DGX Spark (GB10).
 # Winner on this pack: native MTP k=2. Do not mix MTP with a DFlash sidecar.
 set -euo pipefail
 

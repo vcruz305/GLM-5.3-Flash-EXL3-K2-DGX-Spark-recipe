@@ -2,7 +2,7 @@
 
 Reproducible **vLLM** recipe for **[vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2)** on a **single NVIDIA DGX Spark / GB10 (SM121)**.
 
-Install vLLM yourself, download the Hub pack, run `vllm serve`. A convenience script is in [`scripts/serve_one_spark.sh`](scripts/serve_one_spark.sh). This is **not** a container image and it does **not** redistribute weights.
+Install vLLM and ExLlamaV3 in a local virtual environment on the Spark, download the Hub pack, and run `vllm serve` directly. A convenience script is in [`scripts/serve_one_spark.sh`](scripts/serve_one_spark.sh).
 
 > Independent community engineering. Not affiliated with or endorsed by Z.ai, NVIDIA, or vLLM.
 
