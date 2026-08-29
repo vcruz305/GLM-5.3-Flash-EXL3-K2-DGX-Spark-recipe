@@ -1,0 +1,4 @@
+*.sh text eol=lf
+*.py text eol=lf
+*.jinja text eol=lf
+*.md text eol=lf
