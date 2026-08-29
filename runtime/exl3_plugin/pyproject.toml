@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glm53-exl3-vllm-plugin"
+version = "0.1.0"
+description = "Out-of-tree routed-expert EXL3 registration for local vLLM"
+requires-python = ">=3.12"
+
+[project.entry-points."vllm.general_plugins"]
+glm53_exl3 = "glm53_exl3_plugin:register"
+
+[tool.setuptools.packages.find]
+where = ["src"]

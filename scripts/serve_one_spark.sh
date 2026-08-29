@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Serve GLM-5.3-Flash EXL3 K2 from a local vLLM + ExLlamaV3 installation on one DGX Spark (GB10).
-# Winner on this pack: native MTP k=2. Do not mix MTP with a DFlash sidecar.
+# Select exactly one speculative method: none, MTP, or DFlash2.
 set -euo pipefail
 
 MODEL_DIR="${MODEL_DIR:-${HOME}/models/GLM-5.3-Flash-EXL3-K2}"
@@ -8,14 +8,61 @@ HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8888}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.87}"
+KV_CACHE_MEMORY="${KV_CACHE_MEMORY:-}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-2048}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-1}"
-MTP_TOKENS="${MTP_TOKENS:-2}"          # 0 = no spec
+SPEC_METHOD="${SPEC_METHOD:-mtp}"
+MTP_TOKENS="${MTP_TOKENS:-2}"
+DFLASH_DIR="${DFLASH_DIR:-${HOME}/models/GLM-5.3-Flash-DFlash2}"
+DFLASH_TOKENS="${DFLASH_TOKENS:-3}"
+DFLASH_QUANTIZATION="${DFLASH_QUANTIZATION:-}"
+DFLASH_SAMPLE_METHOD="${DFLASH_SAMPLE_METHOD:-probabilistic}"
+DFLASH_KV_DTYPE="${DFLASH_KV_DTYPE:-auto}"
+DFLASH_ATTN_BACKEND="${DFLASH_ATTN_BACKEND:-FLASH_ATTN}"
+GLM_DFLASH_MANAGER_BLOCK_SIZE="${GLM_DFLASH_MANAGER_BLOCK_SIZE:-}"
+ENABLE_PREFIX_CACHING="${ENABLE_PREFIX_CACHING:-1}"
+ENFORCE_EAGER="${ENFORCE_EAGER:-0}"
+CHAT_TEMPLATE="${CHAT_TEMPLATE:-${MODEL_DIR}/chat_template.jinja}"
 SERVED_NAME="${SERVED_NAME:-GLM-5.3-Flash-EXL3}"
+LOAD_FORMAT="${LOAD_FORMAT:-auto}"
 
 if [[ ! -f "$MODEL_DIR/config.json" ]]; then
   echo "missing $MODEL_DIR/config.json — run scripts/download_weights.sh"
   exit 1
+fi
+if [[ ! -f "$CHAT_TEMPLATE" ]]; then
+  echo "missing $CHAT_TEMPLATE — run scripts/patch_chat_template_thinking.py" >&2
+  exit 1
+fi
+case "$SPEC_METHOD" in
+  none|mtp|dflash) ;;
+  *) echo "SPEC_METHOD must be none, mtp, or dflash" >&2; exit 2 ;;
+esac
+if [[ "$SPEC_METHOD" == "dflash" && ! -f "$DFLASH_DIR/config.json" ]]; then
+  echo "missing DFlash2 checkpoint: $DFLASH_DIR/config.json" >&2
+  exit 1
+fi
+case "$DFLASH_SAMPLE_METHOD" in
+  greedy|probabilistic) ;;
+  *) echo "DFLASH_SAMPLE_METHOD must be greedy or probabilistic" >&2; exit 2 ;;
+esac
+case "$ENABLE_PREFIX_CACHING" in
+  0|1) ;;
+  *) echo "ENABLE_PREFIX_CACHING must be 0 or 1" >&2; exit 2 ;;
+esac
+case "$ENFORCE_EAGER" in
+  0|1) ;;
+  *) echo "ENFORCE_EAGER must be 0 or 1" >&2; exit 2 ;;
+esac
+if [[ -n "$GLM_DFLASH_MANAGER_BLOCK_SIZE" ]]; then
+  if (( GLM_DFLASH_MANAGER_BLOCK_SIZE < 128 \
+     || GLM_DFLASH_MANAGER_BLOCK_SIZE % 16 != 0 )); then
+    echo "GLM_DFLASH_MANAGER_BLOCK_SIZE must be >=128 and divisible by 16" >&2
+    exit 2
+  fi
+  # The mixed GLM+DFlash cache planner treats this as an upper bound and
+  # resolves the largest valid divisor of the target manager block.
+  export GLM_DFLASH_MANAGER_BLOCK_SIZE
 fi
 
 if ! command -v vllm >/dev/null 2>&1 && ! python3 -c "import vllm" >/dev/null 2>&1; then
@@ -36,11 +83,9 @@ if int(q.get("bits", -1)) != 2:
     print("WARNING: this recipe was measured at bits=2; config has bits", q.get("bits"))
 PY
 
-export MTP_TOKENS
+export MTP_TOKENS DFLASH_TOKENS DFLASH_DIR DFLASH_QUANTIZATION
+export DFLASH_SAMPLE_METHOD DFLASH_KV_DTYPE DFLASH_ATTN_BACKEND
 export EXL3_FUSED_MOE="${EXL3_FUSED_MOE:-1}"
-export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-12.1a}"
-export FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST:-12.1a}"
-export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"
 export VLLM_NO_USAGE_STATS=1
 export DO_NOT_TRACK=1
 
@@ -51,26 +96,47 @@ ARGS=(
   --port "$PORT"
   --tensor-parallel-size 1
   --quantization exl3
+  --load-format "$LOAD_FORMAT"
   --max-model-len "$MAX_MODEL_LEN"
-  --gpu-memory-utilization "$GPU_MEM_UTIL"
   --max-num-seqs "$MAX_NUM_SEQS"
   --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS"
   --kv-cache-dtype fp8
-  --enable-prefix-caching
   --no-enable-flashinfer-autotune
   --skip-mm-profiling
   --limit-mm-per-prompt '{"image":4,"video":1}'
   --tool-call-parser glm47
   --enable-auto-tool-choice
   --reasoning-parser glm45
+  --chat-template "$CHAT_TEMPLATE"
 )
 
-if [[ "${MTP_TOKENS}" != "0" ]]; then
-  SPEC=$(python3 -c "import json,os; print(json.dumps({'method':'mtp','num_speculative_tokens':int(os.environ['MTP_TOKENS'])},separators=(',',':')))")
-  ARGS+=(--speculative-config "$SPEC")
-  ARGS+=(--cudagraph-capture-sizes 1 2 3 4 6 8 12)
+if [[ "$ENABLE_PREFIX_CACHING" == 1 ]]; then
+  ARGS+=(--enable-prefix-caching)
+else
+  ARGS+=(--no-enable-prefix-caching)
+fi
+if [[ "$ENFORCE_EAGER" == 1 ]]; then
+  ARGS+=(--enforce-eager)
 fi
 
-echo "EXL3_FUSED_MOE=$EXL3_FUSED_MOE MTP_TOKENS=$MTP_TOKENS MAX_MODEL_LEN=$MAX_MODEL_LEN"
+if [[ -n "$KV_CACHE_MEMORY" ]]; then
+  ARGS+=(--kv-cache-memory "$KV_CACHE_MEMORY")
+else
+  ARGS+=(--gpu-memory-utilization "$GPU_MEM_UTIL")
+fi
+
+if [[ "$SPEC_METHOD" == "mtp" ]]; then
+  SPEC=$(python3 -c "import json,os; print(json.dumps({'method':'mtp','num_speculative_tokens':int(os.environ['MTP_TOKENS'])},separators=(',',':')))")
+  ARGS+=(--speculative-config "$SPEC")
+  # Exact target verification sizes are k+1. Keep 3/4/5 so the MTP k=2/3/4
+  # ladder does not silently pad a decode step to a larger captured graph.
+  ARGS+=(--cudagraph-capture-sizes 1 2 3 4 5 6 8 12)
+elif [[ "$SPEC_METHOD" == "dflash" ]]; then
+  SPEC=$(python3 -c 'import json,os; d={"method":"dflash","model":os.environ["DFLASH_DIR"],"num_speculative_tokens":int(os.environ["DFLASH_TOKENS"]),"kv_cache_dtype":os.environ["DFLASH_KV_DTYPE"],"attention_backend":os.environ["DFLASH_ATTN_BACKEND"],"draft_sample_method":os.environ["DFLASH_SAMPLE_METHOD"],"rejection_sample_method":"standard","draft_tensor_parallel_size":1}; q=os.environ.get("DFLASH_QUANTIZATION"); d.update({"quantization":q} if q else {}); print(json.dumps(d,separators=(",",":")))')
+  ARGS+=(--speculative-config "$SPEC")
+  ARGS+=(--cudagraph-capture-sizes 1 2 4 8 16)
+fi
+
+echo "EXL3_FUSED_MOE=$EXL3_FUSED_MOE SPEC_METHOD=$SPEC_METHOD MAX_MODEL_LEN=$MAX_MODEL_LEN"
 echo "vllm ${ARGS[*]}"
 exec vllm "${ARGS[@]}"
