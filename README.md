@@ -33,7 +33,7 @@ Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed 
 | Decode winner @ 8k | **MTP k=2: 15.7–16.5 tok/s**, mean accept **~2.2**, pos1 ~74–83% / pos2 ~44% |
 | Same MTP @ 64k | **14.6–15.7 tok/s** (warm 14.6, TTFT 314 ms). Same winner — slightly slower pages |
 | No-spec floor @ 8k | **9.6–9.8 tok/s** |
-| Max `max-model-len` allocated | **131072** (MTP k=2, util 0.91, KV **786,432**, 6×). Supported serving ctx stays **65536**: a near-limit 130,944-token prompt faults |
+| Max `max-model-len` allocated | **131072** (MTP k=2, util 0.91, KV **786,432**, 6×). Longest prompt verified: **81,920**. **98,304 faults.** Recommended serving ctx stays **65536** |
 | sixcat 0.5.1 | 120/120 think-on at 64k — **overall 84.2 is flagged**, see below |
 
 This recipe is scoped to **2-bit routed experts on one Spark**.
@@ -243,9 +243,9 @@ Same box, fused `exl3_moe`, seqs=1, KV fp8. **Decode tok/s** = `bench_v1.py` thi
 | 8192 | MTP k=2 | 0.87 | 104,857 | 12.80× | pong | **15.7–16.5** | **ranking winner** |
 | 8192 | MTP k=2 | 0.87 | 99,942 | 12.20× | pong | 15.6 | batched 4096 wash |
 | **65536** | MTP k=2 | 0.91 | **786,432** | **12.00×** | pong | **14.6–15.7** | sixcat think-on; warm 14.6 / TTFT 314 ms; accept ~71/35% on the warm window |
-| **131072** | MTP k=2 | 0.91 | **786,432** | **6.00×** | pong | *not benched* | allocates; 65,408-token prompt passes in 92.98 s; 130,944-token prompt faults and kills the engine |
+| **131072** | MTP k=2 | 0.91 | **786,432** | **6.00×** | pong | *not benched* | allocates; **81,920-token prompt passes** (114.8 s); **98,304 faults** in the EXL3 fused-MoE path and kills the engine |
 
-Highest ctx **tried and allocated:** **131072**, but a near-limit prompt faults in the EXL3 fused-MoE path, so **65536 remains the supported serving ctx**. See [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md). DFlash at 8k cannot climb until util 0.91 because draft KV eats the pool.
+Highest ctx **tried and allocated:** **131072**. Longest prompt that completes: **81,920**; **98,304 faults** in the EXL3 fused-MoE path, so **65536 remains the recommended serving ctx**. See [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md). DFlash at 8k cannot climb until util 0.91 because draft KV eats the pool.
 
 Do not quote sixcat suite TPS (16.5 wall across mixed think-on items) as a 64k decode-only number. The 64k decode row above is the same 128-token bench as 8k.
 
@@ -327,7 +327,7 @@ This repo documents **one measured configuration**. It does not claim:
 - 16 tok/s is the GB10 ceiling for every vLLM build
 - 64k decode (14.6 tok/s warm) is a different spec winner than 8k — it is not
 - DFlash 16k/32k tok/s (those boots were `/v1` pong + KV only)
-- that 128k is safe end to end (it allocates and serves a 65k prompt; a 131k prompt faults)
+- that 128k is safe end to end (it allocates and serves an 81,920-token prompt; 98,304 faults)
 - DFlash2 will ever match MTP on this 2-bit pack
 - 84.2 is an untruncated sixcat overall
 - pip `vllm` without EXL3 / Glm5Next / SM121 is sufficient

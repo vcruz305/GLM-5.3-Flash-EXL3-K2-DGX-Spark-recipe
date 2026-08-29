@@ -330,9 +330,32 @@ first hypothesis is 32-bit index arithmetic in the fused expert kernel, since
 the failure appears between a 65k-token prompt that passes and a 131k-token
 prompt that does not, but that is untested.
 
-**Practical guidance until it is pinned: 65536 remains the supported serving
-context.** 131072 allocates and serves short and mid-length requests, and a
-65,408-token prompt completes, but a near-limit prompt takes the engine down.
+### Where the ceiling actually is
+
+An ascending scan on one 131072 boot narrows it. The engine dies at the fault,
+so the last passing length and the first failing length bracket the ceiling:
+
+| Prompt tokens | Result | Wall |
+|---:|---|---:|
+| 65,408 | pass | 92.98 s |
+| **81,920** | **pass** | 114.8 s |
+| **98,304** | **fault** | — |
+
+The failure at 98,304 has the same signature as the one at 130,944, down to the
+frame: `exl3.py:361 apply_exl3_fused_moe`. So this is one reproducible bug with
+a threshold between 81,920 and 98,304, not a near-limit edge case.
+
+**Practical guidance: 81920 is verified to work at a 131072 budget, and 65536
+remains the recommended serving context** because it is the setting the sixcat
+run and the speed ladders were measured at. A prompt of 98,304 tokens or more
+will take the engine down.
+
+Note that prefill is chunked at `--max-num-batched-tokens`, so the MoE should
+only ever see one chunk at a time and total prompt length should not reach it.
+Something in that path is sized by the whole sequence rather than the chunk.
+Halving the chunk to 1024 is the cheap discriminator: if the threshold moves,
+the fault scales with chunk size and there is a config workaround; if 98,304
+still dies, the fault tracks total sequence length and chunking is irrelevant.
 
 ## SGLang boundary
 
