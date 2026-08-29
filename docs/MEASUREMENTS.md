@@ -288,6 +288,52 @@ useful directional A/B but still does not prove an EXL3 kernel will have the
 same overheads. An EXL3 V1 should preserve the same module boundary: `fc` plus
 the 15 MLP matrices only.
 
+## 131072 context, MTP k=2
+
+The context ladder previously stopped at 65536 with 128k recorded as not
+attempted. It was attempted. The result is a partial pass, and it is worth
+stating precisely because "128k works" and "128k allocates" are different
+claims.
+
+| Stage | Result |
+|---|---|
+| allocation at util 0.91 | **succeeds**, GPU KV cache 786,432 tokens, 6.00x concurrency for 131,072 tokens per request |
+| `/v1` identity | serves, `max_model_len` reports 131072 |
+| 65,408 prompt + 16 output | **pass**, 92.979 s wall, `finish_reason: length` |
+| 130,944 prompt + 16 output | **fault**, HTTP 500, engine down with an illegal memory access |
+
+Two things follow.
+
+First, the KV pool is the same 786,432 tokens at 64k and at 128k. Raising
+`max-model-len` does not buy more KV; it divides the same memory-bound pool
+into fewer concurrent slots, 12.00x down to 6.00x. The ceiling here is the
+91 GiB of weights, not the context flag.
+
+Second, this fault is **not** the DFlash page-transition bug. There is no
+DFlash sidecar in this configuration, the speculator is native MTP k=2, and the
+error surfaces on a different path entirely:
+
+```text
+fused_moe/runner/moe_runner.py:612   _apply_quant_method
+fused_moe/routed_experts.py:1238     forward_modular
+glm53_exl3_plugin/exl3.py:752        apply
+glm53_exl3_plugin/exl3.py:406        apply_exl3_experts
+glm53_exl3_plugin/exl3.py:361        apply_exl3_fused_moe
+torch.AcceleratorError: CUDA error: an illegal memory access was encountered
+```
+
+That is the EXL3 fused-MoE path, not the sparse MLA K-pool indexer. This run
+used asynchronous launches, so the reported frame is where the error surfaced
+and not necessarily where the faulting kernel ran; pinning it needs the same
+`CUDA_LAUNCH_BLOCKING=1` treatment that located the DFlash fault. A plausible
+first hypothesis is 32-bit index arithmetic in the fused expert kernel, since
+the failure appears between a 65k-token prompt that passes and a 131k-token
+prompt that does not, but that is untested.
+
+**Practical guidance until it is pinned: 65536 remains the supported serving
+context.** 131072 allocates and serves short and mid-length requests, and a
+65,408-token prompt completes, but a near-limit prompt takes the engine down.
+
 ## SGLang boundary
 
 SGLang was not used as a performance rung because its [current quantization
