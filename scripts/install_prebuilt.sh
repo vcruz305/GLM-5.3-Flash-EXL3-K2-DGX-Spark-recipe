@@ -8,7 +8,7 @@ set -euo pipefail
 
 VENV="${VENV:-${HOME}/venvs/glm53-exl3-local}"
 WHEEL_DIR="${WHEEL_DIR:-${HOME}/glm53-runtime-wheels}"
-WHEEL_REPO="${WHEEL_REPO:-vcruz305/GLM-5.3-Flash-EXL3-K2-runtime}"
+WHEEL_REPO="${WHEEL_REPO:-vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm}"
 TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu130}"
 
 # These wheels contain compiled CUDA extensions. They are not portable across

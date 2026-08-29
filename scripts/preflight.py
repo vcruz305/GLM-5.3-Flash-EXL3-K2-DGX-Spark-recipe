@@ -15,7 +15,7 @@ import platform
 import sys
 from pathlib import Path
 
-WHEEL_INDEX = "https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2-runtime"
+WHEEL_INDEX = "https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm"
 INSTALL_CMD = "bash scripts/install_prebuilt.sh"
 
 
