@@ -168,9 +168,12 @@ SPEC_METHOD=none MAX_MODEL_LEN=8192 GPU_MEM_UTIL=0.87 \
   bash scripts/serve_one_spark.sh
 ```
 
-DFlash2 BF16 and draft-only online FP8 use the same target process; the
-launcher selects FlashAttention for the non-causal draft and aligns its cache
-pages with the target's sparse-MLA allocation:
+DFlash2 BF16 and draft-only online FP8 use the same target process. The
+launcher defaults the draft to **`TRITON_ATTN`**, which is the only draft
+backend that works: with FlashAttention the target's sparse-MLA K-pool indexer
+faults at the first cache page transition and kills the engine. DFlash also
+loses to MTP k=2 by 9% at matched context, so this path is for reproducing the
+measurement, not for serving:
 
 ```bash
 SPEC_METHOD=dflash DFLASH_TOKENS=3 \
