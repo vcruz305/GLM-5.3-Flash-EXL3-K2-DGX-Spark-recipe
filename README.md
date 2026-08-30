@@ -295,20 +295,27 @@ Two sixcat-side edits required on this vLLM:
 
 ### Measured receipt (2026-08-29) — flagged overall
 
-Parser v4, host-guarded HumanEval, selection `challenge-v1` / `05c04833fcdb`, fingerprint `f63dd8393f13`, 120/120, not timed out.
+Parser v4, host-guarded HumanEval, selection `challenge-v1` / `05c04833fcdb`, fingerprint `f63dd8393f13`, 120/120 parsed at high confidence, not timed out. Full report: **[`docs/SIXCAT.md`](docs/SIXCAT.md)**.
 
-| Category | Score | n | trunc | loop |
-|---|---:|---:|---:|---:|
-| knowledge | 65.0 | 20 | 0 | 0 |
-| math | **100.0** | 20 | 0 | 0 |
-| truth | 85.0 | 20 | 0 | 0 |
-| instruct | 75.0 | 20 | **1** | **1** |
-| code | 90.0 | 20 | 0 | 0 |
-| tools | 90.0 | 20 | 0 | 0 |
+| Category | Score | n | trunc | loop | ctok p50 | ctok max | suite_tps |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| knowledge | 65.0 | 20 | 0 | 0 | 118 | 4,256 | 13.56 |
+| math | **100.0** | 20 | 0 | 0 | 109 | 240 | 17.22 |
+| truth | 85.0 | 20 | 0 | 0 | 25 | 122 | 12.40 |
+| instruct | 75.0 | 20 | **1** | **1** | 564 | **32,768** | 17.19 |
+| code | 90.0 | 20 | 0 | 0 | 392 | 2,105 | n/a |
+| tools | 90.0 | 20 | 0 | 0 | 22 | 119 | n/a |
 
-**overall[vendor] 84.2** flags: `truncated:instruct`, `trunc-in-think:instruct`, `loop-failures:instruct` (`ifeval:1300` hit 32768 tokens, empty answer). **Do not quote 84.2 as a clean overall.**
+**overall[vendor] 84.1667** flags: `truncated:instruct`, `trunc-in-think:instruct`, `loop-failures:instruct`. One instruct item hit its full 32,768-token budget and returned an empty answer. **Do not quote 84.2 as a clean overall.**
 
-Wall: 57 191 ctok / 3470 s → suite **16.5 tok/s**. Prefill/decode TPS n/a. `rtok`/`atok` n/a (engine omitted `reasoning_tokens`).
+Wall: 57,191 ctok / 3,470.2 s → suite **16.48 tok/s**, `tps_mean` 13.92. Two caveats:
+
+- That suite rate covers **80 of 120 items**. Code and tools record no per-item throughput, and the token total is knowledge + math + truth + instruct exactly. It is a four-category suite rate, not a decode rate.
+- **Instruct is 77% of the wall clock** (2,676 s of 3,470 s) and 80% of the tokens, from the single 32,768-token item. Median instruct output was 564 tokens.
+
+Prefill/decode TPS n/a (`speed_n` 0). `rtok`/`atok` n/a (engine omitted `reasoning_tokens`).
+
+**Served by the container runtime** (`root: /model`), not the local source build that is 2.4% faster on the four-workload mean. A re-run on the local build is in progress.
 
 ---
 
