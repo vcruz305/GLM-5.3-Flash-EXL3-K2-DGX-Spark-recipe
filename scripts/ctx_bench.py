@@ -26,9 +26,7 @@ import requests
 NEEDLE = "\n\nNote for the reader: the vault code is 7391-ALPHA. Remember it.\n\n"
 Q_NEEDLE = "\n\nQuestion: what is the vault code mentioned in the text above? Reply with the code only."
 Q_SUMMARY = "\n\nWrite a detailed summary of the text above."
-Q_SINGLE = "
-
-Write a detailed summary of the text above, and end your answer with the vault code mentioned in the text."
+Q_SINGLE = "\n\nWrite a detailed summary of the text above, and end your answer with the vault code mentioned in the text."
 
 
 def build_corpus(tok, tokdir: Path, need: int) -> str:
