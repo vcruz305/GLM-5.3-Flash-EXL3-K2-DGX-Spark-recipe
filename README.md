@@ -15,7 +15,7 @@ Install the prebuilt runtime, download the Hub pack, and run `vllm serve`. Start
 | Engine | vLLM, `--quantization exl3`, TP=1. **Stock vLLM cannot load this pack** |
 | Spec | **native MTP k=2** (in the checkpoint). Do not mix with a DFlash sidecar |
 
-Jump: **[Agent instructions](AGENTS.md)** · [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) · [Download](#2-download-the-pack) · [Serve](#3-serve) · [Smoke](#4-identity-smoke) · [Speed](#speed-leaderboard-same-prompt) · [Why 8k](#why-speed-ranks-are-at-8k) · [Ctx ladder](#context-ladder) · [Sixcat](#sixcat-051) · [Pitfalls](#failures-already-paid-for)
+Jump: **[Agent instructions](AGENTS.md)** · [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) · [Download](#2-download-the-pack) · [Serve](#3-serve) · [Smoke](#4-identity-smoke) · [Speed](#speed-leaderboard-same-prompt) · [Why 8k](#why-speed-ranks-are-at-8k) · [Ctx ladder](#context-ladder) · [Sixcat](#sixcat-051) · [Full eval report](docs/SIXCAT.md) · [Pitfalls](#failures-already-paid-for)
 
 ---
 
@@ -36,7 +36,7 @@ Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed 
 | Same MTP @ 64k | **14.6–15.7 tok/s** (warm 14.6, TTFT 314 ms). Same winner — slightly slower pages |
 | No-spec floor @ 8k | **9.6–9.8 tok/s** |
 | Max `max-model-len` allocated | **131072** (MTP k=2, util 0.91, KV **786,432**, 6×). Longest prompt verified: **81,920**. **98,304 faults.** Recommended serving ctx stays **65536** |
-| sixcat 0.5.1 | 120/120 think-on at 64k — **overall 84.2 is flagged**, see below |
+| sixcat 0.5.1 | 120/120 think-on at 64k — **overall 84.1667 is flagged**, see [`docs/SIXCAT.md`](docs/SIXCAT.md) |
 
 This recipe is scoped to **2-bit routed experts on one Spark**.
 
