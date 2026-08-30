@@ -31,8 +31,25 @@ correct. Noise floor from the suite's determinism study: 8.7e-4 nats.
 | checkpoint | routed-expert width | contexts | token mean KLD | CI95 | top-1 | notes |
 |---|---:|---:|---:|---:|---:|---|
 | Official FP8 (anchor) | 8-bit | 24 | 0.0319 | [0.023, 0.041] | 0.938 | our scorer on the suite's capture |
-| EXL3 K2 | 2 bpw | pending | | | | |
+| EXL3 K2 | 2 bpw | 512 | **0.3346** | [0.3204, 0.3487] | **0.788** | median 0.117, p99 3.33, p99.9 6.47; 1,048,064 positions; captured as served (fused EXL3 MoE, fp8 KV) |
 | EXL3 K2/K3 mix (6 layers K3) | 2.14 bpw | pending | | | | |
+
+### Reading the K2 number
+
+- **0.33 nats mean against BF16, about 12x the FP8 anchor (0.03).** That is the
+  price of 2-bit routed experts on every MoE layer (K2 on layers 3 to 44; 0 to 2
+  are dense), measured on the exact path that serves: fused EXL3 MoE kernels,
+  fp8 KV cache, one 2048-token forward per context.
+- **The median is 0.117.** Half of all positions sit within 0.12 nats of the
+  teacher. The mean is pulled up by a tail: p99 is 3.33 nats and p99.9 is 6.47,
+  so roughly one position in a hundred gets a distribution that disagrees hard
+  with BF16. That tail is the mechanism behind the rare derailments sixcat sees
+  on long constrained tasks (`ifeval:1300`) while math and tools stay at 100/95.
+- **Top-1 agreement 78.8%.** Greedy picks the same token as BF16 on about four
+  positions in five (FP8: 94%). MTP acceptance in the ladders tracks this
+  number, which is why the K3 layers in the mix show up first as acceptance.
+- The 95% CI is +-0.014 nats, so a mix-vs-K2 difference above ~0.03 nats on the
+  same 512 contexts is real; sixcat's 120 items cannot see differences that size.
 
 K2 and the mix are captured on the same 512 windows through the same recipe
 runtime, after the K-pool tail fix, so the two are directly comparable and

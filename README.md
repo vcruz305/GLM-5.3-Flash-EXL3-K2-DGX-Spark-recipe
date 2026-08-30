@@ -287,6 +287,23 @@ Do not quote sixcat suite TPS (16.5 wall across mixed think-on items) as a 64k d
 
 ---
 
+## KLD against the BF16 teacher
+
+Full-vocabulary KL(BF16 || K2) on the fidelity suite's 512 sealed 2048-token
+contexts, 1,048,064 scored positions, scored through the model's own final norm
+and lm_head from hidden states captured on the serving path (fused EXL3 MoE,
+fp8 KV).
+
+| checkpoint | token-mean KLD | 95% CI | median | p99 | top-1 agreement |
+|---|---:|---|---:|---:|---:|
+| official FP8 (anchor, 24 contexts) | 0.0319 | [0.023, 0.041] | 0.0055 | 0.40 | 0.938 |
+| **EXL3 K2** | **0.3346** | [0.320, 0.349] | 0.117 | 3.33 | **0.788** |
+
+Half of all positions are within 0.12 nats of BF16; the mean is carried by a
+~1% tail (p99.9 6.47), which is the same tail that produces the rare long-task
+derailments in sixcat. Method, scorer validation and the K2/K3 mix row:
+[`docs/KLD.md`](docs/KLD.md).
+
 ## sixcat 0.5.1
 
 [`scripts/run_sixcat.sh`](scripts/run_sixcat.sh). HTTP `/v1` only. Do not point sixcat at an agent/harness stdio.
