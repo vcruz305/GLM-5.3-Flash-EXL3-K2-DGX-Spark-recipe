@@ -82,33 +82,90 @@ what drives `pos` high enough to matter.
 A clean run is **not** proof a build is unaffected. Whether the write faults or
 corrupts silently depends on where that layer's view sits in the pool.
 
-## Proposed fix
+## The correct mapping already exists, and is conditionally skipped
 
-The tail's block index must be the request's single block, not a function of
-position. Given `block_size == KPOOL == 4` for this group, the correct mapping
-is:
+An earlier revision of this document proposed adding a one-block mapping. That
+was wrong in an instructive way: **the correct code is already there.** In
+`vllm/v1/attention/backends/mla/indexer.py`:
 
-```text
-slot = block_table[req, 0] * KPOOL + (pos % KPOOL)
+```python
+def compute_kpool_tail_slot_mapping(...):
+    """Map every token to its request's one circular tail block."""
+    own_block = block_table[:num_reqs, 0].index_select(0, req).to(torch.int64)
+    pos = positions[:num_actual_tokens].to(torch.int64)
+    out[:num_actual_tokens] = own_block * kpool + torch.remainder(pos, kpool)
 ```
 
-against the current:
+That is exactly `block_table[req, 0] * KPOOL + pos % KPOOL`, the addressing the
+kernel documents. There is even a dedicated `KpoolTailMetadataBuilder` described
+as building "only the circular slot mapping needed by the storage-only tail".
 
-```text
-slot = block_table[req, pos // block_size] * block_size + (pos % block_size)
+The defect is its caller:
+
+```python
+slot_mapping = common_attn_metadata.slot_mapping   # generic paged mapping
+positions = common_attn_metadata.positions
+if positions is not None:                          # silent fallthrough
+    slot_mapping = compute_kpool_tail_slot_mapping(...)
 ```
 
-The clean form is a third `SlotMappingMode`, alongside `TOKEN_TO_KV_SLOT` and
-`NONE`, that pins the block index to entry 0 and takes the offset modulo the
-block size. That keeps the change inside the block-table layer, leaves the
-kernels untouched, and matches the "one-block circular" contract the spec
-already declares.
+When `positions` is None the correction is skipped and the **generic paged
+mapping is used unchanged** — the one that indexes a one-entry row by
+`pos // block_size`. A guard that silently degrades to incorrect addressing
+rather than failing.
 
-Independently, and regardless of which fix lands, both kernels should bounds
-check their destination block. A guard cannot be wrong. It is not sufficient on
-its own: if the mapping is left broken, guarding converts a crash into silently
-dropped tail writes, which in a 2-bit model means fluent wrong output rather
-than a loud failure.
+Note also the second construction site in the same file, which builds a
+`DeepseekV32IndexerMetadata` from `compressed_slot_mapping` with no tail
+correction at all. If the tail group's metadata comes from that path, the
+correction never runs regardless of `positions`.
+
+### What was tried and did not work
+
+Clamping the block index inside the generic slot-mapping kernel:
+
+```python
+block_indices = tl.minimum(block_indices, block_table_stride - 1)
+```
+
+Applied cleanly and changed nothing: 48 overruns before, 48 after, identical
+magnitudes. That is the evidence that the tail mapping does not come from
+`block_table.py` at all, and it is why the fix must go where the mapping is
+actually produced.
+
+### Next step
+
+Determine, at the seed call site, whether `positions` is None and which of the
+two construction sites produced the tail metadata. That decides between
+"populate `positions` for the tail group" and "route the tail group to
+`KpoolTailMetadataBuilder`". Both are small; picking without measuring is how
+the previous attempt was wasted.
+
+Independently, both kernels should bounds-check their destination block. A guard
+cannot be wrong, but it is not sufficient: if the mapping stays broken, guarding
+converts a crash into silently dropped tail writes, which in a 2-bit model means
+fluent wrong output rather than a loud failure.
+
+## Detecting it on your own build
+
+`scripts/patch_kpool_tail_detector.py` installs an opt-in counter on both write
+paths, the prefill seed and the decode update. It is inert unless
+`GLM_KPOOL_TAIL_BOUNDS=1` is set on the server process, and it ships in the
+runtime so no rebuild is needed to check a box.
+
+```bash
+# serve with the detector armed, then
+SERVER_LOG=/path/to/server.log bash scripts/soak.sh
+```
+
+The soak generates ~20,000 tokens using near-unsatisfiable prompts, which is
+what drives sequence position high enough to matter, and exits non-zero if any
+out-of-bounds write is counted.
+
+**Why a counter and not a crash test.** Every affected build performs the bad
+writes. Whether one escapes its allocation depends on where each tail layer's
+view sits in the shared pool, so a completed run proves nothing and four
+completed runs prove nothing four times. Only the counter distinguishes
+"unaffected" from "lucky".
 
 ## Acceptance test
 

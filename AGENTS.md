@@ -30,6 +30,17 @@ layer's sparse-attention index instead of crashing.
 - Reproducer: `bash scripts/repro_kpool_tail_overrun.sh`
 - Mechanism and fix status: `docs/KPOOL_TAIL_BUG.md`
 
+**Check your own build instead of guessing.** Serve with
+`GLM_KPOOL_TAIL_BOUNDS=1`, then:
+
+```bash
+SERVER_LOG=/path/to/server.log bash scripts/soak.sh
+```
+
+It generates ~20k tokens and fails if a single out-of-bounds tail write occurs.
+Zero overruns over a long generation is the only evidence that means anything;
+a run completing is not.
+
 If you are running an eval or benchmark on this runtime, say in your report that
 it ran on a build with this open defect.
 

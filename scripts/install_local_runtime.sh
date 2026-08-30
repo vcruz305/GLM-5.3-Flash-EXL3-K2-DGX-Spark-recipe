@@ -78,6 +78,10 @@ export MAX_JOBS NVCC_THREADS
 "$PYTHON" "$RECIPE_ROOT/scripts/patch_glm53_sm121_nope.py" --source "$VLLM_SRC"
 "$PYTHON" "$RECIPE_ROOT/scripts/patch_glm53_eagle3.py" --source "$VLLM_SRC"
 "$PYTHON" "$RECIPE_ROOT/scripts/patch_dflash2_selective_quant.py" --source "$VLLM_SRC"
+# Opt-in K-pool tail bounds detector. Inert unless GLM_KPOOL_TAIL_BOUNDS=1
+# is set on the server. Shipping it means anyone can answer "is my build
+# affected?" with a number instead of waiting for a crash.
+"$PYTHON" "$RECIPE_ROOT/scripts/patch_kpool_tail_detector.py" --source "$VLLM_SRC"
 "$PYTHON" -m pip install --no-build-isolation --editable "$VLLM_SRC"
 "$PYTHON" -m pip install --pre --upgrade "flashinfer-python==0.6.18rc10"
 "$PYTHON" -m pip install --editable "$RECIPE_ROOT/runtime/exl3_plugin"
