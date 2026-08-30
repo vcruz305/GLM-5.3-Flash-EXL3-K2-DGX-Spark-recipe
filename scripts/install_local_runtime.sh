@@ -81,6 +81,10 @@ export MAX_JOBS NVCC_THREADS
 # Opt-in K-pool tail bounds detector. Inert unless GLM_KPOOL_TAIL_BOUNDS=1
 # is set on the server. Shipping it means anyone can answer "is my build
 # affected?" with a number instead of waiting for a crash.
+# K-pool tail fix: hybrid models never passed positions to the tail metadata
+# builder, and the corrected mapping must be written in place for CUDA graphs.
+# See docs/KPOOL_TAIL_BUG.md.
+"$PYTHON" "$RECIPE_ROOT/scripts/patch_kpool_tail_positions.py" --source "$VLLM_SRC"
 "$PYTHON" "$RECIPE_ROOT/scripts/patch_kpool_tail_detector.py" --source "$VLLM_SRC"
 "$PYTHON" -m pip install --no-build-isolation --editable "$VLLM_SRC"
 "$PYTHON" -m pip install --pre --upgrade "flashinfer-python==0.6.18rc10"

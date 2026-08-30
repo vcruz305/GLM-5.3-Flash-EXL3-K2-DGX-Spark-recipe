@@ -17,6 +17,7 @@ import importlib
 import os
 from typing import TYPE_CHECKING, Any
 
+import re
 import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
@@ -432,6 +433,20 @@ class Exl3Config(QuantizationConfig):
         self.bits = int(bits)
         self.codebook = str(codebook)
         self.scope = str(scope)
+        # Optional per-layer override, e.g. {"42": 3, "27": 3}. Layers absent
+        # from the map use `bits`. This is how a mixed-K checkpoint (K2 base
+        # with K3 delta layers) declares itself; the trellis tensors for those
+        # layers are shaped for their own K and would fail the load shape
+        # check under the base K.
+        raw_layer_bits = kwargs.pop("layer_bits", None) or {}
+        self.layer_bits: dict[int, int] = {
+            int(k): int(v) for k, v in dict(raw_layer_bits).items()
+        }
+        for layer_idx, layer_k in self.layer_bits.items():
+            if layer_k not in (2, 3, 4, 5, 6):
+                raise ValueError(
+                    f"unsupported EXL3 bits={layer_k} for layer {layer_idx}"
+                )
         self.raw_config = dict(kwargs)
         if self.codebook != "mcg":
             raise ValueError(
@@ -442,6 +457,17 @@ class Exl3Config(QuantizationConfig):
 
     def get_name(self) -> str:
         return "exl3"
+
+    _LAYER_RE = re.compile(r"(?:^|\.)layers\.(\d+)(?:\.|$)")
+
+    def bits_for_prefix(self, prefix: str) -> int:
+        """Per-layer K: `layer_bits` entry for this layer, else the base K."""
+        if not self.layer_bits:
+            return self.bits
+        m = self._LAYER_RE.search(prefix or "")
+        if m is None:
+            return self.bits
+        return self.layer_bits.get(int(m.group(1)), self.bits)
 
     def get_supported_act_dtypes(self) -> list[torch.dtype]:
         return [torch.bfloat16, torch.float16, torch.float32]
@@ -488,7 +514,9 @@ class Exl3Config(QuantizationConfig):
         from vllm.model_executor.layers.fused_moe.routed_experts import RoutedExperts
 
         if isinstance(layer, RoutedExperts):
-            return Exl3MoEMethod(layer.moe_config, self)
+            return Exl3MoEMethod(
+                layer.moe_config, self, bits=self.bits_for_prefix(prefix)
+            )
         if isinstance(layer, LinearBase):
             return UnquantizedLinearMethod()
         return None
@@ -497,10 +525,13 @@ class Exl3Config(QuantizationConfig):
 class Exl3MoEMethod(FusedMoEMethodBase):
     """Packed MCG trellis experts: create/load packed tensors, LinearEXL3 apply."""
 
-    def __init__(self, moe, quant_config: Exl3Config) -> None:
+    def __init__(
+        self, moe, quant_config: Exl3Config, bits: int | None = None
+    ) -> None:
         super().__init__(moe)
         self.quant_config = quant_config
-        self.bits = quant_config.bits
+        # One method instance per RoutedExperts layer, so this is per-layer K.
+        self.bits = int(bits) if bits is not None else quant_config.bits
         self._logged = False
 
     def get_fused_moe_quant_config(self, layer: "RoutedExperts") -> FusedMoEQuantConfig | None:
@@ -706,6 +737,13 @@ class Exl3MoEMethod(FusedMoEMethodBase):
             except Exception as exc:
                 fused_err = repr(exc)
                 layer._exl3_ptrs = None
+        if not self._logged and self.bits != self.quant_config.bits:
+            logger.info(
+                "EXL3 per-layer K override: layer prefix %s uses bits=%d (base %d)",
+                getattr(layer, "layer_name", None) or getattr(layer, "prefix", "?"),
+                self.bits,
+                self.quant_config.bits,
+            )
         if not self._logged:
             if fused_ok:
                 logger.info(

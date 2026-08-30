@@ -16,33 +16,13 @@ EXL3 comes from this repo's out-of-tree plugin. If you find yourself
 troubleshooting "vLLM lacks EXL3 and glm5next", you installed the wrong vLLM;
 stop and install the runtime below.
 
-## Known engine-fatal bug: read before you trust a result
+## K-pool tail bug: fixed in the 2026-08-30 wheels
 
-GLM-5.3's sparse-MLA K-pool tail cache is written out of bounds on long
-generations. It is not EXL3 and not fixed by any flag.
-
-**Do not conclude a build is healthy because a run completed.** Every affected
-build performs the bad writes; whether one escapes its allocation and kills the
-engine depends on memory layout. Contained writes silently corrupt another
-layer's sparse-attention index instead of crashing.
-
-- Trigger is **generated** tokens (~2.2k reported), not context length.
-- Reproducer: `bash scripts/repro_kpool_tail_overrun.sh`
-- Mechanism and fix status: `docs/KPOOL_TAIL_BUG.md`
-
-**Check your own build instead of guessing.** Serve with
-`GLM_KPOOL_TAIL_BOUNDS=1`, then:
-
-```bash
-SERVER_LOG=/path/to/server.log bash scripts/soak.sh
-```
-
-It generates ~20k tokens and fails if a single out-of-bounds tail write occurs.
-Zero overruns over a long generation is the only evidence that means anything;
-a run completing is not.
-
-If you are running an eval or benchmark on this runtime, say in your report that
-it ran on a build with this open defect.
+Wheels published before 2026-08-30 write GLM-5.3's K-pool tail cache out of
+bounds on long generations (engine death or silent attention corruption).
+Reinstall with `bash scripts/install_prebuilt.sh`. To verify a build yourself,
+serve with `ENFORCE_EAGER=1 GLM_KPOOL_TAIL_BOUNDS=1` and run `scripts/soak.sh`;
+the detector only counts in eager mode. Details: `docs/KPOOL_TAIL_BUG.md`.
 
 ## Order of operations
 

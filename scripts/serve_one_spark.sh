@@ -7,7 +7,12 @@ MODEL_DIR="${MODEL_DIR:-${HOME}/models/GLM-5.3-Flash-EXL3-K2}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8888}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
-GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.87}"
+# 0.87 is the measured 8k default. The 64k measurements (sixcat, the 64k
+# ladders) were taken at 0.91, and at 0.87 the KV pool is materially smaller.
+# Pick the measured value for the context unless the caller overrides it.
+if [[ -z "${GPU_MEM_UTIL:-}" ]]; then
+  if (( MAX_MODEL_LEN >= 65536 )); then GPU_MEM_UTIL=0.91; else GPU_MEM_UTIL=0.87; fi
+fi
 KV_CACHE_MEMORY="${KV_CACHE_MEMORY:-}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-2048}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-1}"

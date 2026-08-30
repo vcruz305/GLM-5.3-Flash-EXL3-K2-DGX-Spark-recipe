@@ -4,28 +4,16 @@ Reproducible **vLLM** recipe for **[vcruz305/GLM-5.3-Flash-EXL3-K2](https://hugg
 
 Install the prebuilt runtime, download the Hub pack, and run `vllm serve`. Start with `python scripts/preflight.py`; it takes a second and tells you what is missing. Agents should read [`AGENTS.md`](AGENTS.md) first.
 
-> ### ⚠ Known engine-fatal bug in this runtime
+> ### K-pool tail bug: fixed in the 2026-08-30 wheels
 >
-> GLM-5.3's sparse-MLA **K-pool tail cache is written out of bounds** on long
-> generations. This is model-attention plumbing in the vLLM fork, **not** EXL3,
-> and it affects any quantization of GLM-5.3-Flash.
->
-> **Every affected build performs the bad writes.** Whether you see a crash
-> depends only on where each tail layer's view sits in the shared KV pool: most
-> overrunning writes land inside the pool and silently corrupt another layer's
-> sparse-attention index, and only the highest-offset layer escapes the
-> allocation and kills the engine. A clean run is therefore **not** evidence
-> that your build is unaffected.
->
-> - Reported in the field at **~2.2k generated tokens**, at both 64k and 128k
->   context. Context length is not the trigger and does not protect you.
-> - Short-generation workloads (throughput benchmarks, `/v1` smokes) rarely
->   show it. Thinking-on evals hit it reliably.
-> - Mechanism, reproducer and proposed fix: [`docs/KPOOL_TAIL_BUG.md`](docs/KPOOL_TAIL_BUG.md)
-> - One-request reproducer: [`scripts/repro_kpool_tail_overrun.sh`](scripts/repro_kpool_tail_overrun.sh)
->
-> Status: root-caused, fix **not yet validated**. Treat scores produced on this
-> runtime as provisional.
+> GLM-5.3's sparse-MLA K-pool tail cache was written out of bounds on long
+> generations (hybrid models never passed positions to the tail metadata
+> builder, so its one-block mapping was skipped). Not EXL3-specific; it is in
+> every GLM-5.3 build on this vLLM lineage, including the TR3 / 2x-Spark image.
+> Fixed by [`scripts/patch_kpool_tail_positions.py`](scripts/patch_kpool_tail_positions.py),
+> shipped in [spark-vllm](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm).
+> Reinstall with `bash scripts/install_prebuilt.sh`. Details, reproducer and
+> detector: [`docs/KPOOL_TAIL_BUG.md`](docs/KPOOL_TAIL_BUG.md).
 
 > Independent community engineering. Not affiliated with or endorsed by Z.ai, NVIDIA, or vLLM.
 

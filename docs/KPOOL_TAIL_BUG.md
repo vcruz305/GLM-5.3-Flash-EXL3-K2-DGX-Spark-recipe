@@ -1,5 +1,11 @@
 # GLM-5.3 K-pool tail: out-of-bounds slot mapping
 
+**Status: fixed.** `scripts/patch_kpool_tail_positions.py`, shipped in the
+`spark-vllm` wheels from 2026-08-30. Validated at 65,536 context with CUDA
+graphs on: the `ifeval:1300` prompt generated 4,096 and 8,192 tokens to
+completion with the engine alive, and under `--enforce-eager` the device-side
+detector counted 19,575 decode-path tail updates with zero out of bounds.
+
 Root cause for the CUDA illegal memory accesses seen on `Glm5NextForConditionalGeneration`
 in vLLM. Affects any quantization; it is model-attention plumbing, not EXL3.
 
@@ -132,20 +138,96 @@ magnitudes. That is the evidence that the tail mapping does not come from
 `block_table.py` at all, and it is why the fix must go where the mapping is
 actually produced.
 
-### Next step
+### Why positions are None: the hybrid model-state path drops them
 
-Determine, at the seed call site, whether `positions` is None and which of the
-two construction sites produced the tail metadata. That decides between
-"populate `positions` for the tail group" and "route the tail group to
-`KpoolTailMetadataBuilder`". Both are small; picking without measuring is how
-the previous attempt was wasted.
+Measured with a probe at the tail builder: `positions_is_none=True` on every
+call. The reason is one call site. vLLM's V2 model runner builds attention
+metadata per model family in `v1/worker/gpu/model_states/`:
 
-Independently, both kernels should bounds-check their destination block. A guard
-cannot be wrong, but it is not sufficient: if the mapping stays broken, guarding
-converts a crash into silently dropped tail writes, which in a 2-bit model means
-fluent wrong output rather than a loud failure.
+- `default.py` (plain transformers) calls `build_attn_metadata(...,
+  positions=input_batch.positions, ...)`.
+- `mamba_hybrid.py` (every hybrid model, including GLM-5.3 with its KDA
+  layers) calls `build_attn_metadata(...)` **without** `positions=`, and the
+  parameter defaults to `None`.
+
+So on hybrid models the K-pool tail builder never receives positions, the
+one-block correction is skipped, and the generic paged mapping is used against
+a one-entry block-table row.
+
+This is present in the ZJY0516/vllm pin this recipe builds from (`878631b6`)
+**and** in the `vllm/vllm-openai:glm53-flash-arm64-cu130` image
+(`487ecf187`) that the TR3-4bpw / 2x-Spark recipes run. It is not specific to
+EXL3, K2, or single-GPU serving. Recipes on that image have not measured it;
+whether a given layout crashes or silently corrupts a neighbouring layer's
+sparse-attention index is decided by pool geometry, and a completed run is not
+evidence either way.
+
+### The fix
+
+`scripts/patch_kpool_tail_positions.py` adds the missing argument to the hybrid
+path, mirroring `default.py`:
+
+```python
+            positions=input_batch.positions,
+```
+
+One line. With real positions present, the existing
+`compute_kpool_tail_slot_mapping` runs and produces
+`block_table[req, 0] * KPOOL + pos % KPOOL`, exactly the addressing the kernel
+documents.
+
+Two earlier attempts are recorded because both looked right and were not:
+
+- clamping the block index inside the generic slot-mapping kernel changed
+  nothing (48 overruns before and after) — the tail mapping does not come from
+  that kernel once positions are present, and the clamp only masked garbage;
+- synthesizing positions from `seq_lens` and `query_start_loc` at the tail
+  builder made every tail write in-bounds during warmup, then died with an
+  `Xid 13 Out Of Range Address` one second after graph capture. Deriving values
+  the runner already has is the wrong layer to fix at.
+
+### Second half of the fix: the corrected mapping must be written in place
+
+With positions present, `compute_kpool_tail_slot_mapping` runs every step and
+returned `slot_mapping.clone()`, a fresh allocation. CUDA graph capture records
+that transient address; on replay the tail kernels read a buffer that has since
+been freed or reused. Measured: the one-line positions fix booted and passed
+1,500- and 4,000-token generations under `--enforce-eager`, and died with
+`Xid 13 Out Of Range Address` one second after graph capture with graphs on.
+The patch therefore also makes the function write the tail group's persistent
+buffer in place, which is the correct semantics anyway: that buffer is the tail
+group's slot mapping.
+
+### A measurement lesson that cost several boots
+
+Python-side instrumentation inside a CUDA-graph-captured op runs at capture
+time and never again: real requests replay the graph. A counter that prints
+from Python will report zero on a build that is writing out of bounds on every
+request. The detector this recipe ships accumulates in **device tensors updated
+by the captured kernels**, so replays update it. Only that kind of counter is
+evidence.
+
+### Decode-path proof
+
+With both halves of the fix applied, at `max-model-len` 65536 under
+`--enforce-eager` with `CUDA_LAUNCH_BLOCKING=1`, the `ifeval:1300` prompt
+(76 tokens) generated its full 4,096-token budget:
+
+```text
+KPOOL_TAIL_BOUNDS calls=19599 overruns=0 (seed 0/24, decode 0/19575) worst_block=2 tail_blocks=116
+```
+
+19,575 decode-path tail updates, every destination inside the 116-block tail
+cache, highest block written 2. Before the fix the same path produced
+destination blocks in the tens of thousands.
 
 ## Detecting it on your own build
+
+**Limitation:** the detector's device-side ops are themselves captured by CUDA
+graphs and kill the engine on the first request in graph mode at 64k. Run the
+detector with `--enforce-eager` (`ENFORCE_EAGER=1` in `serve_one_spark.sh`),
+where it is proven to count on the decode path. It is inert unless
+`GLM_KPOOL_TAIL_BOUNDS=1` is set, so the shipped wheel is unaffected.
 
 `scripts/patch_kpool_tail_detector.py` installs an opt-in counter on both write
 paths, the prefill seed and the decode update. It is inert unless
