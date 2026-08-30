@@ -298,10 +298,11 @@ fp8 KV).
 |---|---:|---|---:|---:|---:|
 | official FP8 (anchor, 24 contexts) | 0.0319 | [0.023, 0.041] | 0.0055 | 0.40 | 0.938 |
 | **EXL3 K2** | **0.3346** | [0.320, 0.349] | 0.117 | 3.33 | **0.788** |
+| EXL3 K2/K3 mix (6 layers K3) | 0.3121 | [0.299, 0.325] | 0.106 | 3.13 | 0.795 |
 
 Half of all positions are within 0.12 nats of BF16; the mean is carried by a
 ~1% tail (p99.9 6.47), which is the same tail that produces the rare long-task
-derailments in sixcat. Method, scorer validation and the K2/K3 mix row:
+derailments in sixcat. The mix is lower on 505 of 512 contexts (paired: -0.0225 nats, CI [0.0207, 0.0243]). Method, scorer validation and the paired analysis:
 [`docs/KLD.md`](docs/KLD.md).
 
 ## sixcat 0.5.1

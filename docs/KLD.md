@@ -32,7 +32,28 @@ correct. Noise floor from the suite's determinism study: 8.7e-4 nats.
 |---|---:|---:|---:|---:|---:|---|
 | Official FP8 (anchor) | 8-bit | 24 | 0.0319 | [0.023, 0.041] | 0.938 | our scorer on the suite's capture |
 | EXL3 K2 | 2 bpw | 512 | **0.3346** | [0.3204, 0.3487] | **0.788** | median 0.117, p99 3.33, p99.9 6.47; 1,048,064 positions; captured as served (fused EXL3 MoE, fp8 KV) |
-| EXL3 K2/K3 mix (6 layers K3) | 2.14 bpw | pending | | | | |
+| EXL3 K2/K3 mix (6 layers K3) | 2.14 bpw | 512 | **0.3121** | [0.2993, 0.3249] | **0.795** | median 0.106, p99 3.13, p99.9 6.33; same 512 contexts and path as K2 |
+
+### K2 vs the mix, paired on the same 512 contexts
+
+Both captures scored the same contexts, so the per-context difference is the
+right test, and it is not close:
+
+| statistic | K2 | mix | difference |
+|---|---:|---:|---:|
+| token-mean KLD | 0.3346 | 0.3121 | **-6.7%** |
+| median KLD | 0.117 | 0.106 | -9.4% |
+| p99 / p99.9 | 3.33 / 6.47 | 3.13 / 6.33 | -6% / -2% |
+| top-1 agreement | 0.788 | 0.795 | **+0.71 pts** |
+| worst context mean | 1.219 | 1.133 | |
+
+Paired over 512 contexts: the mix is lower by **0.0225 nats per context, 95% CI
+[0.0207, 0.0243], t = 24.4**, and lower on **505 of 512 contexts (98.6%)**. The
+top-1 gain is +0.0071 with CI [+0.0065, +0.0077]. Six K3 layers (24, 27, 35, 37,
+42 in the scored decoder, plus 45, the MTP layer, which only matters at serve
+time) buy 6.7% of the K2 divergence for 5.7 GiB. That is the same signal the
+ladders showed as higher MTP acceptance, now measured directly; sixcat's 120
+items (84.17 vs 83.33) could not resolve it.
 
 ### Reading the K2 number
 
