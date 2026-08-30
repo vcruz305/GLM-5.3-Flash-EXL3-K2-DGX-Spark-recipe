@@ -36,7 +36,9 @@ if ! grep -q "KPOOL_TAIL_BOUNDS" "$SERVER_LOG" 2>/dev/null; then
   echo "otherwise this gate silently passes everything." >&2
 fi
 
-before=$(grep -c "KPOOL_TAIL_OVERRUN" "$SERVER_LOG" 2>/dev/null || echo 0)
+# grep -c prints 0 AND exits 1 when nothing matches; "|| echo 0" would append
+# a second 0 and break the arithmetic below. Default only if the read failed.
+before=$(grep -c "KPOOL_TAIL_OVERRUN" "$SERVER_LOG" 2>/dev/null); before=${before:-0}
 
 # Prompts chosen to run long. The near-unsatisfiable constraints make the model
 # loop in thinking, which is what drives sequence position high enough to matter.
@@ -85,7 +87,7 @@ print(json.dumps({
 done
 
 sleep 2
-after=$(grep -c "KPOOL_TAIL_OVERRUN" "$SERVER_LOG" 2>/dev/null || echo 0)
+after=$(grep -c "KPOOL_TAIL_OVERRUN" "$SERVER_LOG" 2>/dev/null); after=${after:-0}
 new=$(( after - before ))
 
 echo

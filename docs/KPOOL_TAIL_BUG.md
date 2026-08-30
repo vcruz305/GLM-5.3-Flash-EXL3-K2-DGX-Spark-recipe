@@ -221,6 +221,15 @@ KPOOL_TAIL_BOUNDS calls=19599 overruns=0 (seed 0/24, decode 0/19575) worst_block
 cache, highest block written 2. Before the fix the same path produced
 destination blocks in the tens of thousands.
 
+### Soak result on the shipped fix
+
+`scripts/soak.sh` against the fixed build at 65,536 context under
+`--enforce-eager` with the detector armed: three 4,096-token generations,
+12,288 tokens total, **57,551 decode-path tail updates, 0 out of bounds**,
+highest block written 10 of 202, no faults. (The soak script's own verdict line
+was broken by a `grep -c || echo 0` double-zero until this commit; the detector
+counter is the evidence.)
+
 ## Detecting it on your own build
 
 **Limitation:** the detector's device-side ops are themselves captured by CUDA
