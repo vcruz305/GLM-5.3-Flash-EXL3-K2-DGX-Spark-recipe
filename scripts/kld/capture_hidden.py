@@ -16,6 +16,12 @@ from pathlib import Path
 
 os.environ.setdefault("EXL3_FUSED_MOE", "1")
 os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
+# apply_model() ships Python functions to the engine core. Keep the engine in
+# this process so the hook and the captured tensors never cross a process
+# boundary (and never need pickle); the second flag is the fallback if the
+# runner ignores the first.
+os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
+os.environ.setdefault("VLLM_ALLOW_INSECURE_SERIALIZATION", "1")
 
 
 def _ensure_nvcc() -> None:
