@@ -421,6 +421,39 @@ That single mechanism accounts for every symptom in this document:
 Counts at 65536 on an 8,192-token prompt: **132 overrunning calls against 252
 clean ones**. A 2,048-token prompt stayed in bounds.
 
+### Minimal reproducer, and the trigger is generation not prompt
+
+The sixcat crash is deterministic and reduces to **one request**. It died at the
+same point twice, on the original run and on a resume with a cold server and an
+empty KV cache, which rules out accumulated state. The item is `ifeval:1300`:
+
+```json
+{"id": "ifeval:1300", "ptok": 76, "ctok": 32768, "finish": "length", "ok": false}
+```
+
+A **76-token prompt** that drives a **32,768-token generation**. The constraints
+are close to unsatisfiable, no commas and no letter "c" in 250+ words, so the
+model loops in thinking and runs to its full budget.
+
+That corrects the framing the rest of this document was built on. Every context
+probe here used long **prompts**. The trigger is total sequence length reached
+by **decoding**, which is the far more common path in real serving and is why an
+eval with thinking on found this when prefill probes only found the edges.
+
+It also unifies the two runtimes. This is the same item that carries the
+`truncated:instruct` / `trunc-in-think:instruct` / `loop-failures:instruct` flag
+on the container run's 84.1667. There it generated its 32,768 tokens, the
+out-of-bounds writes stayed inside the pool, and it scored as a loop failure. On
+the local build the allocation layout differs, the write escapes, and the engine
+dies. Same defect, two manifestations, decided by memory layout.
+
+[`scripts/repro_kpool_tail_overrun.sh`](../scripts/repro_kpool_tail_overrun.sh)
+issues exactly that request. It needs no eval harness.
+
+A clean run of it is **not** proof a build is unaffected: whether the write
+faults or corrupts silently depends on where that tail layer's view sits in the
+shared pool.
+
 ### What this does and does not license
 
 It is not established that this measurably degrades output. The 64k sixcat
