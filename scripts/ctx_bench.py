@@ -60,7 +60,17 @@ def stream_chat(base_url: str, model: str, content: str, max_tokens: int, timeou
     ttft = None
     text = []
     usage = None
-    with requests.post(f"{base_url}/chat/completions", json=body, stream=True, timeout=timeout) as r:
+    try:
+        return _stream(base_url, body, timeout, t0)
+    except requests.RequestException as e:
+        return {"error": f"{type(e).__name__}: {e}", "wall_s": time.perf_counter() - t0}
+
+
+def _stream(base_url: str, body: dict, timeout: int, t0: float) -> dict:
+    ttft = None
+    text = []
+    usage = None
+    with requests.post(f"{base_url}/chat/completions", json=body, stream=True, timeout=(15, timeout)) as r:
         if r.status_code != 200:
             return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
         for line in r.iter_lines():
@@ -117,6 +127,8 @@ def main() -> int:
             s = stream_chat(args.base_url, args.model, text + (Q_SINGLE if args.single else Q_SUMMARY), args.max_tokens, args.timeout)
             if "error" in s or not s.get("usage") or s.get("ttft_s") is None:
                 rec["error"] = s.get("error", "no usage/ttft in stream")
+                if "wall_s" in s:
+                    rec["wall_s"] = round(s["wall_s"], 1)
                 failures += 1
                 fh.write(json.dumps(rec) + "\n"); fh.flush()
                 summary.append(f"{target//1024}k: ERROR {rec['error'][:60]}")
