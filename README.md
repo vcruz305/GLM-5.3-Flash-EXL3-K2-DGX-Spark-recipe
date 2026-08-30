@@ -263,6 +263,31 @@ The 8k table is **spec method A/B** (none vs DFlash k vs MTP k), not “this is 
 
 ---
 
+## Long context: measured ceiling (2026-08-31)
+
+`MAX_MODEL_LEN=262144` boots and serves with CUDA graphs and MTP k=2:
+**KV pool 1,093,332 tokens** (4.17 concurrent full-256k requests), 93.74 GiB
+after load. Real-text needle ladder on that server, prefix caching off, needle
+planted at 10% depth and recalled **verbatim at every passing point**:
+
+| prompt tokens | prefill tok/s | TTFT | decode tok/s | needle |
+|---:|---:|---:|---:|---|
+| 7,830 | 528 | 14.8 s | 18.8 | found |
+| 32,405 | 597–602 | 54 s | 16.6–17.0 | found |
+| 65,173 | 601–603 | 108 s | 16.7–17.8 | found |
+| 130,709 | 572–584 | 224–229 s | 17.4–19.8 | found |
+| 147,091 | 591 | 249 s | 19.1 | found |
+| **163,479** | 588 | 278 s | 17.3 | found |
+| ~179,900 | **engine wedge** — request never returns, engine logs stop, restart required | | | |
+
+**Known runtime bug, under investigation:** prompts between ~163k and ~180k
+tokens hang the engine (reproduced twice, also at ~192k; a hang, not a crash —
+no illegal memory access). Until it is fixed, treat **163k prompt tokens as the
+verified ceiling**; `MAX_MODEL_LEN` up to 262,144 is safe memory-wise, and
+contexts at or below 131,072 cannot reach the wedge at all. Reproducer:
+`scripts/ctx_bench.py`. This is in the serving runtime, not the pack: the same
+weights answer with perfect needle recall at 163k.
+
 ## Context ladder
 
 Same box, fused `exl3_moe`, seqs=1, KV fp8. **Decode tok/s** = `bench_v1.py` thinking off, 128 gen, warm row when present. Empty decode = we allocated KV and `/v1` pong’d, no 128-token bench on that boot.

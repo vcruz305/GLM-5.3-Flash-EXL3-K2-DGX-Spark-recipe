@@ -84,3 +84,14 @@ Full numbers and the reasoning are in [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS
 ## nvcc must be on PATH
 
 vLLM's `has_flashinfer()` returns False without `nvcc` on PATH and then rejects the only sparse-MLA backend for GB10 (`No valid attention backend found for cuda ... FLASHINFER_MLA_SPARSE_SM120`). `scripts/serve_one_spark.sh` adds `/usr/local/cuda-13.0/bin` itself and `scripts/preflight.py` checks it; if you launch `vllm serve` by hand, `export PATH=/usr/local/cuda-13.0/bin:$PATH` first. FlashInfer's JIT also runs `ninja` from the venv's `bin/`, so activate the venv (or put `~/venvs/glm53-exl3-local/bin` on PATH) rather than calling the venv's python by absolute path from a bare shell.
+
+## Context limits (measured 2026-08-31)
+
+`MAX_MODEL_LEN=262144` boots (KV pool 1.09M tokens on K2) and prompts up to
+**163,479 tokens are verified** with perfect needle recall (prefill ~590 tok/s,
+decode ~17–20 tok/s). **Do not send prompts above ~163k tokens yet:** a runtime
+bug wedges the engine somewhere between 163k and 180k prompt tokens — the
+request never returns, the engine's log goes silent, and the server must be
+restarted (the API port still accepts connections, so health checks lie).
+`MAX_MODEL_LEN` ≤131072 cannot hit it. Fix in progress; see the README's
+long-context section.

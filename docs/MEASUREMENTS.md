@@ -506,3 +506,10 @@ the ExLlamaV3 fused-MoE call, GLM-5.3 sparse attention, and DFlash auxiliary
 state handling. Until that backend exists, vLLM is the only tested server in
 this recipe; this is a compatibility boundary, not a claim that SGLang would
 be slower.
+
+## 256k boot and needle ladder (2026-08-31)
+
+See the README's "Long context: measured ceiling" section for the full table:
+262,144 boots (KV 1,093,332 tokens, 93.74 GiB), needle-perfect through 163,479
+prompt tokens, engine wedge between ~163k and ~180k under investigation. Raw
+records: `ctx256-k2.jsonl` from `scripts/ctx_bench.py`.
