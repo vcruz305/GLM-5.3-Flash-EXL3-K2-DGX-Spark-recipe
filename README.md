@@ -326,7 +326,7 @@ Wall: 57,191 ctok / 3,470.2 s → suite **16.48 tok/s**, `tps_mean` 13.92. Two c
 
 Prefill/decode TPS n/a (`speed_n` 0). `rtok`/`atok` n/a (engine omitted `reasoning_tokens`).
 
-**Served by the container runtime** (`root: /model`), not the local source build that is 2.4% faster on the four-workload mean. A re-run on the local build is in progress.
+That receipt was served by the container runtime. **Re-run on the fixed local build (2026-08-30): overall 84.17 again**, knowledge 70 / math 100 / truth 80 / instruct 70 / code 90 / tools 95, 120/120, no faults, `--request-timeout 3600`. Per-category differences are one item each; see [`docs/SIXCAT.md`](docs/SIXCAT.md).
 
 ---
 

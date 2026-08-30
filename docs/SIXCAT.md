@@ -91,7 +91,31 @@ hit the budget, and produced an empty answer.
 That is what the flag on 84.1667 means. Fixing or excluding that one item would
 move both the instruct score and the wall-clock profile materially.
 
-## Re-run on the local build: did not complete
+## Re-run on the fixed local build (2026-08-30): 120/120
+
+After the K-pool tail fix, same invocation, `--request-timeout 3600`:
+
+| Category | Score | trunc | loop | empty | ctok p50 | ctok max | total ctok | wall s | tps_mean |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| knowledge | 70.0 | 1 | 0 | 1 | 124 | 8,192 | 12,873 | 926.1 | 12.88 |
+| math | **100.0** | 0 | 0 | 0 | 118 | 288 | 2,522 | 148.7 | 16.78 |
+| truth | 80.0 | 0 | 0 | 0 | 26 | 172 | 951 | 76.6 | 11.51 |
+| instruct | 70.0 | 1 | 1 | 1 | 623 | 32,768 | 46,422 | 2,656.6 | 14.96 |
+| code | 90.0 | 0 | 0 | 0 | 507 | 6,101 | n/a | n/a | n/a |
+| tools | 95.0 | 0 | 0 | 0 | 24 | 120 | n/a | n/a | n/a |
+| **overall[vendor]** | **84.17** | | | | | | | | |
+
+Flags: `truncated:knowledge`, `trunc-in-think:knowledge`, `truncated:instruct`,
+`trunc-in-think:instruct`, `loop-failures:instruct`. Suite 16.48 tok/s over
+62,768 ctok in 3,808 s (four categories). The budget-hitting items are `mmlu:8`
+(8,192, empty) and `ifeval:1300` (32,768, loop), the same two as every run.
+
+Same overall as the container run, different per-category shape (knowledge
++5, truth -5, instruct -5, tools +5): one item each way, which is what 20
+items per category at temperature 1.0 looks like between runs. The K2/K3 mix on
+the same runtime scored 83.33; see the mix recipe's `docs/SIXCAT.md`.
+
+## Earlier re-run on the unfixed local build: did not complete
 
 The scores above were served by the container runtime, so the suite was re-run
 unchanged on the local source build, same selection profile, policy fingerprint,
