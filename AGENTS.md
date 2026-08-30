@@ -16,6 +16,23 @@ EXL3 comes from this repo's out-of-tree plugin. If you find yourself
 troubleshooting "vLLM lacks EXL3 and glm5next", you installed the wrong vLLM;
 stop and install the runtime below.
 
+## Known engine-fatal bug: read before you trust a result
+
+GLM-5.3's sparse-MLA K-pool tail cache is written out of bounds on long
+generations. It is not EXL3 and not fixed by any flag.
+
+**Do not conclude a build is healthy because a run completed.** Every affected
+build performs the bad writes; whether one escapes its allocation and kills the
+engine depends on memory layout. Contained writes silently corrupt another
+layer's sparse-attention index instead of crashing.
+
+- Trigger is **generated** tokens (~2.2k reported), not context length.
+- Reproducer: `bash scripts/repro_kpool_tail_overrun.sh`
+- Mechanism and fix status: `docs/KPOOL_TAIL_BUG.md`
+
+If you are running an eval or benchmark on this runtime, say in your report that
+it ran on a build with this open defect.
+
 ## Order of operations
 
 ```bash

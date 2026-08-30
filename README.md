@@ -4,6 +4,29 @@ Reproducible **vLLM** recipe for **[vcruz305/GLM-5.3-Flash-EXL3-K2](https://hugg
 
 Install the prebuilt runtime, download the Hub pack, and run `vllm serve`. Start with `python scripts/preflight.py`; it takes a second and tells you what is missing. Agents should read [`AGENTS.md`](AGENTS.md) first.
 
+> ### ⚠ Known engine-fatal bug in this runtime
+>
+> GLM-5.3's sparse-MLA **K-pool tail cache is written out of bounds** on long
+> generations. This is model-attention plumbing in the vLLM fork, **not** EXL3,
+> and it affects any quantization of GLM-5.3-Flash.
+>
+> **Every affected build performs the bad writes.** Whether you see a crash
+> depends only on where each tail layer's view sits in the shared KV pool: most
+> overrunning writes land inside the pool and silently corrupt another layer's
+> sparse-attention index, and only the highest-offset layer escapes the
+> allocation and kills the engine. A clean run is therefore **not** evidence
+> that your build is unaffected.
+>
+> - Reported in the field at **~2.2k generated tokens**, at both 64k and 128k
+>   context. Context length is not the trigger and does not protect you.
+> - Short-generation workloads (throughput benchmarks, `/v1` smokes) rarely
+>   show it. Thinking-on evals hit it reliably.
+> - Mechanism, reproducer and proposed fix: [`docs/KPOOL_TAIL_BUG.md`](docs/KPOOL_TAIL_BUG.md)
+> - One-request reproducer: [`scripts/repro_kpool_tail_overrun.sh`](scripts/repro_kpool_tail_overrun.sh)
+>
+> Status: root-caused, fix **not yet validated**. Treat scores produced on this
+> runtime as provisional.
+
 > Independent community engineering. Not affiliated with or endorsed by Z.ai, NVIDIA, or vLLM.
 
 | What | Where |
@@ -35,7 +58,7 @@ Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed 
 | Decode winner @ 8k | **MTP k=2: 15.7–16.5 tok/s**, mean accept **~2.2**, pos1 ~74–83% / pos2 ~44% |
 | Same MTP @ 64k | **14.6–15.7 tok/s** (warm 14.6, TTFT 314 ms). Same winner — slightly slower pages |
 | No-spec floor @ 8k | **9.6–9.8 tok/s** |
-| Max `max-model-len` allocated | **131072** (MTP k=2, util 0.91, KV **786,432**, 6×). Longest prompt verified: **81,920**. **98,304 faults.** Recommended serving ctx stays **65536** |
+| Max `max-model-len` allocated | **131072** (MTP k=2, util 0.91, KV **786,432**, 6×). Context does **not** bound the known K-pool fault; see the warning below |
 | sixcat 0.5.1 | 120/120 think-on at 64k — **overall 84.1667 is flagged**, see [`docs/SIXCAT.md`](docs/SIXCAT.md) |
 
 This recipe is scoped to **2-bit routed experts on one Spark**.
@@ -264,9 +287,9 @@ Same box, fused `exl3_moe`, seqs=1, KV fp8. **Decode tok/s** = `bench_v1.py` thi
 | 8192 | MTP k=2 | 0.87 | 104,857 | 12.80× | pong | **15.7–16.5** | **ranking winner** |
 | 8192 | MTP k=2 | 0.87 | 99,942 | 12.20× | pong | 15.6 | batched 4096 wash |
 | **65536** | MTP k=2 | 0.91 | **786,432** | **12.00×** | pong | **14.6–15.7** | sixcat think-on; warm 14.6 / TTFT 314 ms; accept ~71/35% on the warm window |
-| **131072** | MTP k=2 | 0.91 | **786,432** | **6.00×** | pong | *not benched* | allocates; **81,920-token prompt passes** (114.8 s); **98,304 faults** in the EXL3 fused-MoE path and kills the engine |
+| **131072** | MTP k=2 | 0.91 | **786,432** | **6.00×** | pong | *not benched* | allocates; **81,920-token prompt passes** (114.8 s); **98,304 faults** in the sparse-MLA K-pool tail and kills the engine |
 
-Highest ctx **tried and allocated:** **131072**. Longest prompt that completes: **81,920**; **98,304 faults** in the EXL3 fused-MoE path, so **65536 remains the recommended serving ctx**. See [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md). DFlash at 8k cannot climb until util 0.91 because draft KV eats the pool.
+Highest ctx **tried and allocated:** **131072**. Longest prompt that completes: **81,920**; **98,304 faults** in the sparse-MLA K-pool tail. **Context is not what protects you** (see the warning at the top): the same fault hits at ~2.2k *generated* tokens regardless of `max-model-len`. See [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md). DFlash at 8k cannot climb until util 0.91 because draft KV eats the pool.
 
 Do not quote sixcat suite TPS (16.5 wall across mixed think-on items) as a 64k decode-only number. The 64k decode row above is the same 128-token bench as 8k.
 
