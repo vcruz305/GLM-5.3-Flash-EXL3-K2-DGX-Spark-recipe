@@ -55,6 +55,9 @@ On anything else, build from source and expect to fix things.
   is a fresh load. Budget for it rather than assuming a hang.
 - **9.6 to 9.8 tok/s with no speculation.** That is the floor, not a missing
   kernel. Use MTP k=2.
+- **A pip conflict on `flashinfer-python`.** vLLM's metadata pins 0.6.17; this
+  recipe runs 0.6.18rc10, which is what every measurement was taken on. The
+  warning is expected. Do not downgrade to silence it.
 - **`hf download --resume-download`.** The flag does not exist. `--local-dir`
   already resumes. Never `--force-download` a partial destination.
 - **`scheduled_spec_decode_tokens=[-1, ...]`** in a scheduler dump is shape
