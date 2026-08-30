@@ -40,6 +40,15 @@ def _drain(model):
     return out
 
 
+def _layer_k(model):
+    """Per-layer EXL3 K as the loaded plugin will dispatch it (RoutedExperts._exl3_k)."""
+    ks = {}
+    for name, mod in model.named_modules():
+        if hasattr(mod, "_exl3_k") and ".layers." in name:
+            ks[int(name.split(".layers.")[1].split(".")[0])] = int(mod._exl3_k)
+    return ks
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", required=True)
@@ -67,6 +76,10 @@ def main() -> None:
         limit_mm_per_prompt={"image": 0, "video": 0},
     )
     print(llm.apply_model(_install_hook)[0], flush=True)
+
+    ks = llm.apply_model(_layer_k)[0]
+    print("EXL3_LAYER_K", json.dumps({str(k): v for k, v in sorted(ks.items())}), flush=True)
+    print("EXL3_LAYER_K_SUMMARY", json.dumps({f"K{v}": sorted(k for k, kk in ks.items() if kk == v) for v in sorted(set(ks.values()))}), flush=True)
     sp = SamplingParams(max_tokens=1, temperature=0.0)
 
     done = 0

@@ -469,6 +469,32 @@ span the pool the mapping addresses. Guarding alone would silently drop writes
 if the mapping is meant to be global, so the semantics question has to be
 answered first, upstream, by whoever owns `glm5next`.
 
+## After the K-pool tail fix (2026-08-30)
+
+Same harness as the runtime A/B above: 64k, MTP k=2, four workloads, one warm-up
+plus three measured runs, 400 completion tokens, CUDA graphs on, prefix caching
+on. The only change is the runtime fix in
+[`KPOOL_TAIL_BUG.md`](KPOOL_TAIL_BUG.md).
+
+| Workload | Before fix (same build) | After fix | Delta |
+|---|---:|---:|---:|
+| prose | 15.1284 tok/s | 14.8064 tok/s | -2.1% |
+| structured | 20.5982 tok/s | 20.2678 tok/s | -1.6% |
+| code | 16.1220 tok/s | 15.6495 tok/s | -2.9% |
+| math | 17.3159 tok/s | 16.2294 tok/s | -6.3% |
+| arithmetic mean | 17.2911 tok/s | 16.7383 tok/s | -3.2% |
+
+Two readings are possible and this run does not separate them: the fix makes the
+tail path do work every step that the broken path skipped (a per-step slot
+mapping plus real tail writes), or this is run-to-run spread, which has been
+2-3% on this box. A paired re-run on one boot would settle it. Either way the
+before-fix numbers were produced by a runtime writing out of bounds, so they
+were never a clean baseline.
+
+Stability on the same boot, graphs on: 4,096- and 8,192-token generations and
+a 32,000-token prompt all completed (the pre-fix build died at ~2.2k generated
+tokens in the field).
+
 ## SGLang boundary
 
 SGLang was not used as a performance rung because its [current quantization

@@ -143,9 +143,11 @@ python -m sixcat \
   --model GLM-5.3-Flash-EXL3 \
   --policy vendor --policy-family glm-5.x \
   --thinking on --limit 20 --max-minutes 0 \
-  --request-timeout 1800 --ctx 65536 --concurrency 1 \
+  --request-timeout 3600 --ctx 65536 --concurrency 1 \
   --transport openai --no-resume
 ```
+
+`--request-timeout 3600`: `ifeval:1300` runs to its full 32,768-token budget, about 1,830 s at 16 tok/s; at the earlier 1,800 s the client timed out on it while the engine was healthy.
 
 `--limit 20` is 20 **per category**, about 120 items, not 20 total. Serve at
 65,536 so the think-on budgets fit: knowledge 8,192, math 16,384, truth 8,192,

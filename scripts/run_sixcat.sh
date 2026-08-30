@@ -33,7 +33,7 @@ exec "$PY" -m sixcat \
   --thinking on \
   --limit 20 \
   --max-minutes 0 \
-  --request-timeout 1800 \
+  --request-timeout 3600 \
   --ctx "${CTX:-65536}" \
   --concurrency 1 \
   --transport openai \

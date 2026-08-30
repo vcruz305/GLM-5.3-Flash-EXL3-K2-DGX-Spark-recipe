@@ -38,7 +38,9 @@ if TYPE_CHECKING:
         SharedExperts,
     )
 
-logger = init_logger(__name__)
+# Under the "vllm." hierarchy so vLLM's logging config actually emits these
+# INFO lines; a bare module name is dropped and the load log shows nothing.
+logger = init_logger("vllm." + __name__)
 
 MCG_MULTIPLIER = 0xCBAC1FED
 MCG_MARKER_SIGNED_INT32 = -877912083
