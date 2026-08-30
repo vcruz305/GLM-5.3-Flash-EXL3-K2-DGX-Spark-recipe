@@ -24,7 +24,12 @@ def _ensure_nvcc() -> None:
     subprocess and inherits this PATH."""
     import glob
     import shutil
+    import sys
 
+    # FlashInfer's JIT also needs ninja, which pip put in this venv's bin/.
+    venv_bin = os.path.join(sys.prefix, "bin")
+    if venv_bin not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = venv_bin + os.pathsep + os.environ.get("PATH", "")
     if shutil.which("nvcc"):
         return
     for cand in sorted(glob.glob("/usr/local/cuda*/bin/nvcc"), reverse=True):

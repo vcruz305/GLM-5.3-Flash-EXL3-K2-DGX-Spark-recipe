@@ -14,6 +14,13 @@ if ! command -v nvcc >/dev/null 2>&1; then
     if [[ -x "$d/nvcc" ]]; then export PATH="$d:$PATH"; echo "nvcc was not on PATH; added $d"; break; fi
   done
 fi
+# FlashInfer's JIT runs ninja, which pip installs into the venv's bin/. Serve
+# through the venv's vllm and put that bin/ on PATH so ninja resolves.
+if ! command -v ninja >/dev/null 2>&1; then
+  for d in "${VENV:-$HOME/venvs/glm53-exl3-local}/bin" "$(dirname "$(command -v vllm 2>/dev/null || echo /nonexistent/x)")"; do
+    if [[ -x "$d/ninja" ]]; then export PATH="$d:$PATH"; echo "ninja was not on PATH; added $d"; break; fi
+  done
+fi
 if ! command -v nvcc >/dev/null 2>&1; then
   echo "nvcc not found. Install the CUDA 13 toolkit or: export PATH=/usr/local/cuda-13.0/bin:\$PATH" >&2
   echo "Without it vLLM rejects FLASHINFER_MLA_SPARSE_SM120 and fails with 'No valid attention backend found'." >&2

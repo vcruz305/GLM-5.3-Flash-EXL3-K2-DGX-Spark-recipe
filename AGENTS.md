@@ -83,4 +83,4 @@ Full numbers and the reasoning are in [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS
 
 ## nvcc must be on PATH
 
-vLLM's `has_flashinfer()` returns False without `nvcc` on PATH and then rejects the only sparse-MLA backend for GB10 (`No valid attention backend found for cuda ... FLASHINFER_MLA_SPARSE_SM120`). `scripts/serve_one_spark.sh` adds `/usr/local/cuda-13.0/bin` itself and `scripts/preflight.py` checks it; if you launch `vllm serve` by hand, `export PATH=/usr/local/cuda-13.0/bin:$PATH` first.
+vLLM's `has_flashinfer()` returns False without `nvcc` on PATH and then rejects the only sparse-MLA backend for GB10 (`No valid attention backend found for cuda ... FLASHINFER_MLA_SPARSE_SM120`). `scripts/serve_one_spark.sh` adds `/usr/local/cuda-13.0/bin` itself and `scripts/preflight.py` checks it; if you launch `vllm serve` by hand, `export PATH=/usr/local/cuda-13.0/bin:$PATH` first. FlashInfer's JIT also runs `ninja` from the venv's `bin/`, so activate the venv (or put `~/venvs/glm53-exl3-local/bin` on PATH) rather than calling the venv's python by absolute path from a bare shell.

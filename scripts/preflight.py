@@ -56,6 +56,16 @@ def main() -> int:
 
     py = f"{sys.version_info.major}.{sys.version_info.minor}"
     r.check("python 3.12", sys.version_info[:2] == (3, 12), py)
+    ninja = shutil.which("ninja") or (
+        os.path.join(sys.prefix, "bin", "ninja")
+        if os.path.exists(os.path.join(sys.prefix, "bin", "ninja")) else None
+    )
+    r.check(
+        "ninja available",
+        ninja is not None,
+        ninja or "not found: FlashInfer JIT runs ninja; pip install ninja into the venv "
+        "or put the venv's bin/ on PATH",
+    )
     nvcc = shutil.which("nvcc")
     r.check(
         "nvcc on PATH",
