@@ -93,6 +93,7 @@ def main() -> int:
     ap.add_argument("--timeout", type=int, default=3600)
     ap.add_argument("--label", default="ctx")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--single", action="store_true", help="one request per point: summary that must end with the needle (for 512k/1M where a prefill costs minutes)")
     args = ap.parse_args()
 
     from transformers import AutoTokenizer
@@ -112,7 +113,7 @@ def main() -> int:
             cut = int(len(text) * 0.10)
             text = text[:cut] + NEEDLE + text[cut:]
             rec = {"label": args.label, "target": target}
-            s = stream_chat(args.base_url, args.model, text + Q_SUMMARY, args.max_tokens, args.timeout)
+            s = stream_chat(args.base_url, args.model, text + (Q_SINGLE if args.single else Q_SUMMARY), args.max_tokens, args.timeout)
             if "error" in s or not s.get("usage") or s.get("ttft_s") is None:
                 rec["error"] = s.get("error", "no usage/ttft in stream")
                 failures += 1
@@ -132,8 +133,15 @@ def main() -> int:
                 "decode_tps": round(ct / dec_s, 2) if ct > 1 else None,
                 "total_s": round(s["total_s"], 3),
             })
-            n = stream_chat(args.base_url, args.model, text + Q_NEEDLE, 32, args.timeout)
-            if "error" in n:
+            if args.single:
+                rec["needle_answer"] = s["text"].strip()[-80:]
+                rec["needle_ok"] = "7391-ALPHA" in s["text"]
+                n = {"skipped": True}
+            else:
+                n = stream_chat(args.base_url, args.model, text + Q_NEEDLE, 32, args.timeout)
+            if n.get("skipped"):
+                pass
+            elif "error" in n:
                 rec["needle_error"] = n["error"]
                 failures += 1
             else:
