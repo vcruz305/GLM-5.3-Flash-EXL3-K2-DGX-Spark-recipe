@@ -17,6 +17,28 @@ from pathlib import Path
 os.environ.setdefault("EXL3_FUSED_MOE", "1")
 os.environ.setdefault("VLLM_NO_USAGE_STATS", "1")
 
+
+def _ensure_nvcc() -> None:
+    """vLLM's has_flashinfer() needs nvcc on PATH or it rejects the only sparse-MLA
+    backend for SM121 ("No valid attention backend found"). The engine core is a
+    subprocess and inherits this PATH."""
+    import glob
+    import shutil
+
+    if shutil.which("nvcc"):
+        return
+    for cand in sorted(glob.glob("/usr/local/cuda*/bin/nvcc"), reverse=True):
+        os.environ["PATH"] = os.path.dirname(cand) + os.pathsep + os.environ.get("PATH", "")
+        print(f"nvcc was not on PATH; added {os.path.dirname(cand)}", flush=True)
+        return
+    raise SystemExit(
+        "nvcc not on PATH and no /usr/local/cuda*/bin/nvcc found; vLLM would reject "
+        "FLASHINFER_MLA_SPARSE_SM120. export PATH=/usr/local/cuda-13.0/bin:$PATH"
+    )
+
+
+_ensure_nvcc()
+
 import torch  # noqa: E402
 from safetensors.torch import save_file  # noqa: E402
 

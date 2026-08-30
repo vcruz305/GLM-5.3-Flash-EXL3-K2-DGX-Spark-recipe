@@ -12,6 +12,7 @@ import argparse
 import importlib.util
 import os
 import platform
+import shutil
 import sys
 from pathlib import Path
 
@@ -55,6 +56,14 @@ def main() -> int:
 
     py = f"{sys.version_info.major}.{sys.version_info.minor}"
     r.check("python 3.12", sys.version_info[:2] == (3, 12), py)
+    nvcc = shutil.which("nvcc")
+    r.check(
+        "nvcc on PATH",
+        nvcc is not None,
+        nvcc or "not found: vLLM's has_flashinfer() then rejects FLASHINFER_MLA_SPARSE_SM120 "
+        "and serve fails with 'No valid attention backend found'. "
+        "export PATH=/usr/local/cuda-13.0/bin:$PATH",
+    )
 
     try:
         import torch

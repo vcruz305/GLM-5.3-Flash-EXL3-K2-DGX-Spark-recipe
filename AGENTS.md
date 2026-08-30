@@ -80,3 +80,7 @@ On anything else, build from source and expect to fix things.
   tokens faults and kills the engine.
 
 Full numbers and the reasoning are in [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md).
+
+## nvcc must be on PATH
+
+vLLM's `has_flashinfer()` returns False without `nvcc` on PATH and then rejects the only sparse-MLA backend for GB10 (`No valid attention backend found for cuda ... FLASHINFER_MLA_SPARSE_SM120`). `scripts/serve_one_spark.sh` adds `/usr/local/cuda-13.0/bin` itself and `scripts/preflight.py` checks it; if you launch `vllm serve` by hand, `export PATH=/usr/local/cuda-13.0/bin:$PATH` first.

@@ -3,6 +3,23 @@
 # Select exactly one speculative method: none, MTP, or DFlash2.
 set -euo pipefail
 
+# vLLM's has_flashinfer() returns False when nvcc is not on PATH (FlashInfer
+# JIT-compiles its kernels on this box; there are no pre-downloaded cubins), and
+# the only sparse-MLA backend for SM121 is then rejected at engine init:
+#   ValueError: No valid attention backend found for cuda with ... use_sparse=True
+#   Reasons: {FLASHINFER_MLA_SPARSE_SM120: [... requires FlashInfer's sparse MLA decode API]}
+# Put the CUDA 13 toolkit on PATH before vLLM looks for it.
+if ! command -v nvcc >/dev/null 2>&1; then
+  for d in /usr/local/cuda-13.0/bin /usr/local/cuda/bin; do
+    if [[ -x "$d/nvcc" ]]; then export PATH="$d:$PATH"; echo "nvcc was not on PATH; added $d"; break; fi
+  done
+fi
+if ! command -v nvcc >/dev/null 2>&1; then
+  echo "nvcc not found. Install the CUDA 13 toolkit or: export PATH=/usr/local/cuda-13.0/bin:\$PATH" >&2
+  echo "Without it vLLM rejects FLASHINFER_MLA_SPARSE_SM120 and fails with 'No valid attention backend found'." >&2
+  exit 1
+fi
+
 MODEL_DIR="${MODEL_DIR:-${HOME}/models/GLM-5.3-Flash-EXL3-K2}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8888}"
