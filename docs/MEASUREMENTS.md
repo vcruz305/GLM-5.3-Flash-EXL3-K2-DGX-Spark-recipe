@@ -380,6 +380,62 @@ Halving the chunk to 1024 is the cheap discriminator: if the threshold moves,
 the fault scales with chunk size and there is a config workaround; if 98,304
 still dies, the fault tracks total sequence length and chunking is irrelevant.
 
+## Root cause: the K-pool tail slot mapping is in pool block space
+
+Both faults chased above have one mechanism. `_kpool_tail_seed_kernel` receives
+`tail_kv_cache`, which is a **view into the shared KV pool**, one slice per tail
+layer. The view is a few hundred blocks. The tail slot mapping it is indexed
+with carries block ids from the **global pool**, and the kernel uses them
+directly as offsets from the view's base. It masks only the head dimension;
+nothing constrains the block index.
+
+Instrumenting the kernel's own write predicate and bounding only the blocks it
+actually stores to, at `max-model-len` 65536 with an 8,192-token prompt:
+
+```text
+max_written_block=34303    tail_blocks=186
+tensor_bytes=380,928       storage_bytes=13,385,428,992
+storage_offset_bytes=13,171,728,384 ... 13,332,003,840   (per tail layer)
+escapes_allocation=False, False, False, True
+```
+
+At 2,048 bytes per tail block, block 34,303 sits about 67 MiB past the start of
+the view. The consequence depends on where that layer's view sits in the pool:
+
+| Tail layer | Result |
+|---|---|
+| lower offsets | the write lands **inside** the 12.5 GiB KV pool, on other layers' data. Silent corruption, no fault |
+| highest offset | 13,332,003,840 + 70,254,592 = 13,402,258,432 against 13,385,428,992 bytes of storage. Overshoots by **16.8 MB** and CUDA raises an illegal access |
+
+That single mechanism accounts for every symptom in this document:
+
+- The fault is intermittent because only the highest-offset layer escapes.
+- Long context faults sooner because more blocks are allocated, so block ids
+  climb and the overshoot grows.
+- DFlash faults at its first page transition because adding the auxiliary group
+  changes the pool layout and the block ids handed out.
+- The sixcat run still scored well because most overruns land on other tail
+  regions rather than escaping, which degrades sparse-attention index quality
+  subtly rather than crashing.
+
+Counts at 65536 on an 8,192-token prompt: **132 overrunning calls against 252
+clean ones**. A 2,048-token prompt stayed in bounds.
+
+### What this does and does not license
+
+It is not established that this measurably degrades output. The 64k sixcat
+result and the speed ladders were produced on this code path and look sane, so
+the corruption is either landing somewhere benign or affecting index selection
+too little to show. Treat the published numbers as reported, not as retracted.
+
+Two things follow for anyone fixing it. The kernel should bounds-check its
+destination block regardless, because a guard cannot be wrong. And the real fix
+depends on intended semantics, which this investigation did not settle: either
+the slot mapping should be rebased into the per-layer view, or the view should
+span the pool the mapping addresses. Guarding alone would silently drop writes
+if the mapping is meant to be global, so the semantics question has to be
+answered first, upstream, by whoever owns `glm5next`.
+
 ## SGLang boundary
 
 SGLang was not used as a performance rung because its [current quantization
