@@ -98,7 +98,11 @@ bash scripts/install_prebuilt.sh
 That installs CUDA 13 PyTorch if needed, the patched vLLM and ExLlamaV3 wheels,
 FlashInfer, and the routed-expert EXL3 plugin, then reruns preflight. The wheels
 are `aarch64` + Python 3.12 + CUDA 13 and carry compiled CUDA extensions, so they
-are not portable to another architecture or Python minor version.
+are not portable to another architecture or Python minor version. FlashInfer
+JIT-compiles its kernels, so the CUDA 13 toolkit's `nvcc` must be on PATH when
+the server starts (`/usr/local/cuda-13.0/bin`); preflight checks it and the serve
+script adds it. Without it engine init fails with `No valid attention backend
+found for cuda`.
 
 <details>
 <summary>Building from source instead (only if you are changing the patches)</summary>
@@ -343,6 +347,7 @@ That receipt was served by the container runtime. **Re-run on the fixed local bu
 | 12 minutes per A/B | 91 GiB reload | expect it; don’t chain silent retunes |
 | `hf --resume-download` | flag does not exist | `--local-dir` only |
 | marlin MoE | wrong backend on this EXL3 pack | omit |
+| `No valid attention backend found for cuda ... FLASHINFER_MLA_SPARSE_SM120` at engine init | `nvcc` is not on PATH, so vLLM's `has_flashinfer()` rejects the only sparse-MLA backend for GB10 | `export PATH=/usr/local/cuda-13.0/bin:$PATH`; `serve_one_spark.sh` adds it and `preflight.py` checks it |
 
 ---
 
