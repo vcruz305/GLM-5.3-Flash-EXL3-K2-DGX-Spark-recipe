@@ -91,6 +91,47 @@ hit the budget, and produced an empty answer.
 That is what the flag on 84.1667 means. Fixing or excluding that one item would
 move both the instruct score and the wall-clock profile materially.
 
+## Re-run on the local build: did not complete
+
+The scores above were served by the container runtime, so the suite was re-run
+unchanged on the local source build, same selection profile, policy fingerprint,
+context and speculation. Only the runtime differed.
+
+**It crashed.** The server came up at 04:12:37, sixcat ran for about 22 minutes,
+and the engine died after **69 of 120 items** with
+`HTTP 500: EngineCore encountered an issue` and, in the server log, a CUDA
+illegal memory access.
+
+| Stage | Result |
+|---|---|
+| knowledge, math, truth | 60 items completed |
+| instruct | died roughly 9 items in, on `ifeval:*` |
+| code, tools | never reached |
+
+Launch traceback surfaces at `async_utils.get_output` on a copy-event
+synchronize, which is asynchronous attribution rather than the faulting kernel.
+That is the same signature the long-context investigation produced before
+synchronous launches identified `_kpool_tail_seed_kernel`, and instruct is the
+longest and most thinking-heavy category, so this is **consistent with** the
+K-pool tail overrun documented in [`MEASUREMENTS.md`](MEASUREMENTS.md). It is
+not proven to be the same fault; that would need a `CUDA_LAUNCH_BLOCKING=1`
+repeat, which is impractical across a 58-minute suite.
+
+### What this changes
+
+The K-pool tail overrun is not a latent curiosity. It ends a real evaluation
+workload at the recipe's documented serving context.
+
+Why the container run survived all 120 items and the local build did not is
+unresolved, and the mechanism suggests luck rather than correctness: most
+overrunning writes land inside the shared KV pool on other layers' data and
+pass silently, and only the highest-offset tail layer escapes the allocation and
+faults. A different build produces a different allocation layout, so it changes
+which writes escape. Neither runtime is demonstrated to be free of the bug; one
+of them merely got away with it.
+
+Treat this as a single observation. It has not been repeated.
+
 ## Reproducing
 
 [`scripts/run_sixcat.sh`](../scripts/run_sixcat.sh). HTTP `/v1` only; do not
