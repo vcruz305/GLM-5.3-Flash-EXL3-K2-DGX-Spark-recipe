@@ -309,26 +309,49 @@ First, the KV pool is the same 786,432 tokens at 64k and at 128k. Raising
 into fewer concurrent slots, 12.00x down to 6.00x. The ceiling here is the
 91 GiB of weights, not the context flag.
 
-Second, this fault is **not** the DFlash page-transition bug. There is no
-DFlash sidecar in this configuration, the speculator is native MTP k=2, and the
-error surfaces on a different path entirely:
+Second, this fault and the DFlash page-transition fault are **the same
+component**. Re-run with `CUDA_LAUNCH_BLOCKING=1` and eager execution, and the
+synchronous traceback names a different kernel from the asynchronous one:
 
 ```text
-fused_moe/runner/moe_runner.py:612   _apply_quant_method
-fused_moe/routed_experts.py:1238     forward_modular
-glm53_exl3_plugin/exl3.py:752        apply
-glm53_exl3_plugin/exl3.py:406        apply_exl3_experts
-glm53_exl3_plugin/exl3.py:361        apply_exl3_fused_moe
-torch.AcceleratorError: CUDA error: an illegal memory access was encountered
+sparse_attn_indexer_kpool.py:403   sparse_attn_indexer_kpool
+kpool_compress.py:425              kpool_seed_tail_cache
+                                   _kpool_tail_seed_kernel[(n,)](
+RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered
 ```
 
-That is the EXL3 fused-MoE path, not the sparse MLA K-pool indexer. This run
-used asynchronous launches, so the reported frame is where the error surfaced
-and not necessarily where the faulting kernel ran; pinning it needs the same
-`CUDA_LAUNCH_BLOCKING=1` treatment that located the DFlash fault. A plausible
-first hypothesis is 32-bit index arithmetic in the fused expert kernel, since
-the failure appears between a 65k-token prompt that passes and a 131k-token
-prompt that does not, but that is untested.
+An earlier revision of this document reported the EXL3 fused MoE
+(`exl3.py:361 apply_exl3_fused_moe`) as the faulting frame, with the caveat
+that launches were asynchronous. That caveat mattered: the MoE was simply the
+next launch to notice, and the fault is in the **K-pool tail seed**, not in the
+MoE. The chunk-size test pointed the same way, since halving
+`--max-num-batched-tokens` to 1024 did not move the 98,304 threshold, which a
+per-forward MoE buffer overflow would have.
+
+So both open faults live in the GLM-5.3 sparse-MLA K-pool indexer, in two
+different kernels:
+
+| Fault | Kernel | Path |
+|---|---|---|
+| DFlash page transition | `_kpool_decode_update_batched_kernel` | decode |
+| Long context ≥98,304 | `_kpool_tail_seed_kernel` | prefill seed |
+
+`_kpool_tail_seed_kernel` computes its destination as `blk = t // KPOOL` and
+stores at `(blk * 2 * KPOOL + t % KPOOL) * HEAD_DIM`. The only guard is
+`t < 0`. **Nothing checks that `blk` is inside the allocated tail cache**, so a
+tail slot mapping that exceeds capacity writes off the end. That is the leading
+hypothesis for both faults: the `KpoolTailSpec` group, which allocates with a
+manager block size of 4, is mis-sized or mis-indexed, and neither kernel
+bounds-checks its destination.
+
+`scripts/patch_glm53_sm121_nope.py` modifies `KpoolTailSpec` and
+`expand_pools_and_append_tail`, so the defect may be in this recipe's patch
+rather than in the fork.
+
+One measurement caveat. The 81,920 pass was recorded with the default serving
+configuration. Under `--enforce-eager` with prefix caching off, 81,920 also
+faults, so the ceiling is configuration dependent and 81,920 is verified only
+for the defaults this recipe ships.
 
 ### Where the ceiling actually is
 
