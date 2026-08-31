@@ -5,8 +5,8 @@
 ## TL;DR
 
 - The "loopy / unusable" reports were a real bug, in vLLM, not in the quant. Root-caused, fixed in two lines, validated, shipped in prebuilt wheels, reported upstream. The upstream PR still does not carry the fix, so stock builds and the public container image still have it.
-- On the fixed runtime the pack does not loop: 70 agent-shaped responses across two serving shapes, zero real loops, zero tool loops, zero errors. Third shape (the reporter's exact config) finishing now.
-- Long context is real: boots at 262,144, needle recall is perfect through 163,479 prompt tokens, prefill holds ~590 tok/s the whole way. A second runtime bug (a hang between ~163k and ~180k prompt tokens) is bracketed, documented, and under active debugging with stack dumps.
+- On the fixed runtime the pack does not loop: 70 agent-shaped responses across two serving shapes, zero real loops, zero tool loops, zero errors. The third shape (the reporter's exact config) was preempted for the hang investigation and runs on the next box.
+- Long context is real: boots at 262,144, needle recall is perfect through 163,479 prompt tokens, prefill holds ~590 tok/s the whole way. A second runtime bug (a hang above ~163k prompt tokens) is reproduced 8/8, narrowed hard, and still open; chasing it surfaced and fixed a third: an int32 offset overflow in vLLM's vendored flash-linear-attention kernels, standalone-proven and patched (section 3).
 - Fidelity is measured, not vibed: full-vocab KLD against BF16 on 1,048,064 positions per checkpoint, with the official FP8 as the anchor.
 
 ---
@@ -92,7 +92,7 @@ Same K2 weights, same fixed runtime, three serving shapes:
 |---|---:|---|---:|---:|---:|---:|---:|---:|---:|
 | recipe | 65,536 | MTP k=2 | 1 | 1 | 35 | 0 | **0** | 0 | 14.8 |
 | seqs-4 | 65,536 | MTP k=2 | 4 | 4 | 35 | 0 | **0** | 0 | 32.3 |
-| reporter's (DFlash k=7, 1024-batched) | 262,144 | DFlash k=7 | 4 | 4 | running now | | | | |
+| reporter's (DFlash k=7, 1024-batched) | 262,144 | DFlash k=7 | 4 | 4 | preempted for the hang investigation; queued on the next box | | | | |
 
 Notes an honest reader needs:
 
