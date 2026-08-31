@@ -30,6 +30,8 @@ Jump: **[Agent instructions](AGENTS.md)** · [Headline](#headline-what-is-verifi
 
 ---
 
+> **Full evidence report** (the bug that caused the "loopy" reports, the fix, KLD, the loop battery, 256k context): [`docs/IMPROVEMENTS_AND_EVIDENCE.md`](docs/IMPROVEMENTS_AND_EVIDENCE.md)
+
 ## Headline (what is verified)
 
 Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed `/v1/chat/completions`, thinking **off**, 128 completion tokens, `max-num-seqs 1`. **Spec A/B (none / DFlash / MTP) is ranked at 8k** so page size does not confound accept. **Max ctx that allocated:** MTP k=2 at **131072** (KV 786,432), though a near-limit prompt faults there, so supported serving ctx is **65536**. See [Why 8k](#why-speed-ranks-are-at-8k) and [Ctx ladder](#context-ladder). The 91 GiB load is ~12 minutes per boot.
