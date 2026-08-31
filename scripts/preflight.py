@@ -141,7 +141,7 @@ def main() -> int:
             ok,
             f"{shards}/120 shards, {total:,} bytes"
             + ("" if ok else " (expected 120 and 97,728,721,536)"),
-            fatal=False,
+            fatal=True,
         )
     else:
         r.check("pack present", True, f"{model_dir} not downloaded yet", fatal=False)
