@@ -60,7 +60,27 @@ Real-text needle ladder (fidelity-suite text, needle planted at 10% depth, prefi
 | **163,479** | 588 | 278 s | 17.3 | **yes, verbatim** |
 | ~179,900 | engine hang (runtime bug, see below) | | | |
 
-**Known runtime bug, bracketed and in progress.** Prompts between ~163k and ~180k tokens wedge the engine: the request never returns, the engine log goes silent, the port still accepts connections (health checks lie), restart required. Reproduced twice (~180k, ~192k); a hang, not a crash, no illegal memory access. Until the fix lands: treat 163k prompt tokens as the verified ceiling; contexts at or below 131,072 cannot reach it at all. Stack dumps of the wedged engine are being captured tonight with an automated reproducer; this section gets the root cause and fix the same way section 1 did.
+**Known runtime bug, heavily narrowed, still open.** Prompts above ~163k tokens
+wedge the engine: the request never returns, the engine log goes silent, the
+port still accepts connections (health checks lie), restart required. Verified
+ceiling: 163k prompt tokens; contexts at or below 131,072 cannot reach it.
+Eight deterministic reproductions established what it is NOT: not memory
+pressure (identical wedge at gpu-util 0.85 with 12 GiB free), not the MoE
+fat-expert fallback (fixed separately, wedge persisted), not the KDA chunk
+kernels as served (they see 2,048-token steps). Sampled stacks show the
+ExLlamaV3 fused-MoE kernel spinning as the victim while the GPU grinds at 96%,
+pointing at state corrupted by a full-request-length-sized code path in the
+sparse-indexer family from the first prefill step.
+
+**Found and fixed while chasing it: an int32 offset overflow in vLLM's vendored
+flash-linear-attention kernels.** Standalone proof (`scripts/kda_overflow_repro.py`):
+`chunk_kda_with_fused_gate` passes at T=131,072 and raises CUDA illegal memory
+access at T=163,840; two offset products (`boh`/`i_tg` times the H*V*K stride,
+1,048,576) overflow int32 past chunk 2,047 on the varlen path. After casting
+them to int64 (`scripts/patch_fla_i64_offsets_a.py` / `_b.py`), T = 131,072 /
+163,840 / 180,224 / 258,048 all pass with finite outputs. This bug bites any
+GLM-5.3/KDA deployment that feeds the chunk path long single calls, and it is
+in vLLM's tree, not ExLlamaV3, not any quant.
 
 ## 4. The loop battery: does it actually loop?
 
