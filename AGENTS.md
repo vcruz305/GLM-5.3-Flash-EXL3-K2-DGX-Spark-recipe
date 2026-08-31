@@ -95,3 +95,6 @@ request never returns, the engine's log goes silent, and the server must be
 restarted (the API port still accepts connections, so health checks lie).
 `MAX_MODEL_LEN` ≤131072 cannot hit it. Fix in progress; see the README's
 long-context section.
+
+Also field-verified: a root-owned `~/.triton/cache` (from an earlier sudo run)
+breaks the user-mode serve; chown it or set `TRITON_CACHE_DIR` to a writable dir.
