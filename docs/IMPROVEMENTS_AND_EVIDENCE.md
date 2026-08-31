@@ -82,6 +82,16 @@ them to int64 (`scripts/patch_fla_i64_offsets_a.py` / `_b.py`), T = 131,072 /
 GLM-5.3/KDA deployment that feeds the chunk path long single calls, and it is
 in vLLM's tree, not ExLlamaV3, not any quant.
 
+**Update (2026-08-31, second box):** the wedge was reproduced identically on a
+second DGX Spark (wesche-spark-78f1) with the fullest patched stack to date:
+the K-pool fix, the FLA int64 fixes, the upstream BLHNC sparse-MLA addressing
+fix (`57073552`, backported and replicated into the SM121 path), and the GDN
+FP32-beta fix (`56058fd5`). 180k and 192k prompts both still wedge (900 s
+timeout, no output). So the wedge is not the FLA overflow, not the upstream
+BLHNC addressing bug, not the MoE fat-expert path, and not box-specific: it is
+a distinct, still-open defect in the full-request-length code path, under
+active stack-sampling investigation.
+
 ## 4. The loop battery: does it actually loop?
 
 35 agent-shaped responses per serving shape (24 tasks: coding, reasoning, constrained lists, JSON-only, summarization, six multi-turn tool tasks with synthetic tool results, plus a stop-obedience canary), Hermes-style system prompt, 8 tool definitions, thinking on, vendor sampling (T=1.0, top-p 0.95), max_tokens 4,096. A loop is: an 8-word phrase repeated 6+ times, a 20-200 char chunk repeated 5+ times back to back, or the same tool call emitted 3+ times. Reproducer: `scripts/loop_bench.py`.
