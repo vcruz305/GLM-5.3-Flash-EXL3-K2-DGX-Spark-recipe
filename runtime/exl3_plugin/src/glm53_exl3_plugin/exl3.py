@@ -319,6 +319,7 @@ def apply_exl3_fused_moe(
     counts = expert_count[:n_exp]
 
     if tokens > TEMP_ROWS_FUSED and bool((counts > TEMP_ROWS_FUSED).any().item()):
+        logger.info_once("EXL3 fat-chunk slicing ACTIVE (tokens=%d)" % tokens)
         # Deep-context prefill chunks can route more than TEMP_ROWS_FUSED rows
         # to a single expert. The fused kernel covers at most TEMP_ROWS_FUSED
         # rows per expert, and the old fallback reconstructed whole experts
