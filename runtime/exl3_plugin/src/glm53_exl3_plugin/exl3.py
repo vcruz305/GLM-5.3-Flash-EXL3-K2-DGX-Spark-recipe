@@ -317,6 +317,23 @@ def apply_exl3_fused_moe(
     xh = x2d.contiguous().half()
 
     counts = expert_count[:n_exp]
+
+    if tokens > TEMP_ROWS_FUSED and bool((counts > TEMP_ROWS_FUSED).any().item()):
+        # Deep-context prefill chunks can route more than TEMP_ROWS_FUSED rows
+        # to a single expert. The fused kernel covers at most TEMP_ROWS_FUSED
+        # rows per expert, and the old fallback reconstructed whole experts
+        # per chunk, stalling prefill by orders of magnitude past ~160k
+        # context (the ">163k hang"). Within a slice of <= TEMP_ROWS_FUSED
+        # tokens no expert can exceed TEMP_ROWS_FUSED rows (each token adds at
+        # most one row per expert), so re-run the fused path per slice.
+        # Prefill-only: decode batches are at most the largest capture size,
+        # far below TEMP_ROWS_FUSED, and never reach this host sync.
+        for s in range(0, tokens, TEMP_ROWS_FUSED):
+            e = min(s + TEMP_ROWS_FUSED, tokens)
+            out[s:e] = apply_exl3_fused_moe(
+                x2d[s:e], ids[s:e], weights[s:e], layer, inners, expert_map, limit
+            )
+        return out
     fn = exllamav3_ext.exl3_moe
     # -1 = unknown active count: max-concurrency grid, no .item() host sync.
     n_active_host = -1 if _exl3_moe_accepts_num_active(fn) else None
