@@ -432,6 +432,7 @@ Three pieces, and you need all three:
 
 | Repo | Role |
 |---|---|
+| [**vllm-exl3**](https://github.com/vcruz305/vllm-exl3) | the EXL3 plugin's canonical home: source, releases, issues. The wheel below is its distribution mirror |
 | [**spark-vllm**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm) | prebuilt vLLM + ExLlamaV3 + EXL3 plugin wheels for GB10. This is one runtime, not two: vLLM is the engine, ExLlamaV3 supplies the CUDA kernels that decode the 2-bit trellis weights |
 | [**GLM-5.3-Flash-EXL3-K2**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2) | the weights |
 | **this repo** | preflight, install, serve, bench, and the measurement log |

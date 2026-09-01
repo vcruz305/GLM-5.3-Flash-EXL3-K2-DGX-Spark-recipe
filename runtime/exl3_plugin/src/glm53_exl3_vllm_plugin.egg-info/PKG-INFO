@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: glm53-exl3-vllm-plugin
+Version: 0.1.1
+Summary: Out-of-tree routed-expert EXL3 registration for local vLLM
+Requires-Python: >=3.12
