@@ -98,3 +98,12 @@ long-context section.
 
 Also field-verified: a root-owned `~/.triton/cache` (from an earlier sudo run)
 breaks the user-mode serve; chown it or set `TRITON_CACHE_DIR` to a writable dir.
+
+## Plugin home (updated 2026-09-01)
+The EXL3 plugin's canonical home is https://github.com/vcruz305/vllm-exl3
+(package `vllm_exl3`; `glm53_exl3_plugin` remains as a compat shim). The copy
+under `runtime/exl3_plugin/` is provenance only — make plugin changes in the
+vllm-exl3 repo and mirror the built wheel to the HF spark-vllm repo, replacing
+the previous wheel (two wheels break `pip install dir/*.whl`). The fat-expert
+row cap `TEMP_ROWS_FUSED` is 2048; 128 caused the >163k prefill stall
+(see docs/IMPROVEMENTS_AND_EVIDENCE.md section 0).
