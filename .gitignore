@@ -9,3 +9,6 @@ models/
 .hf-token
 *.safetensors
 *.gguf
+runtime/exl3_plugin/dist/
+runtime/exl3_plugin/src/*.egg-info/
+runtime/exl3_plugin/build/

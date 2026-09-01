@@ -1,2 +1,0 @@
-[vllm.general_plugins]
-glm53_exl3 = glm53_exl3_plugin:register
