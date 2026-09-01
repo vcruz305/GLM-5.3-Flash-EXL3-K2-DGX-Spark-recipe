@@ -508,15 +508,18 @@ class Exl3Config(QuantizationConfig):
             "codebook",
             "scope",
             "quant_method",
-            # tr3 ships a 37 MiB per-tensor ledger; keep it off the config object.
+            # Some packs ship a large per-tensor ledger here; keep it off the config object.
             "tensor_storage",
         }
-        return cls(
+        inst = cls(
             bits=int(config.get("bits", 4)),
             codebook=str(config.get("codebook", "mcg")),
             scope=str(config.get("scope", "glm53_routed_experts_only")),
             **{k: v for k, v in config.items() if k not in skip},
         )
+        # __init__ swallows unknown kwargs; stash the delegation dict explicitly.
+        inst.non_routed_quantization = config.get("non_routed_quantization")
+        return inst
 
     @classmethod
     def override_quantization_method(
@@ -538,8 +541,35 @@ class Exl3Config(QuantizationConfig):
                 layer.moe_config, self, bits=self.bits_for_prefix(prefix)
             )
         if isinstance(layer, LinearBase):
+            d = self._non_routed_delegate()
+            if d is not None:
+                m = d.get_quant_method(layer, prefix)
+                if m is not None:
+                    return m
             return UnquantizedLinearMethod()
         return None
+
+    def _non_routed_delegate(self):
+        # Packs that keep non-routed weights in the official source format
+        # (e.g. DeepSeek block-FP8) declare it under
+        # ``quantization_config.non_routed_quantization``; delegate those
+        # layers to the matching quant method so arch-specific fp8 forward
+        # paths get real scale tensors. Absent key = unquantized (GLM).
+        if not hasattr(self, "_nr_delegate_cached"):
+            self._nr_delegate_cached = None
+            nrq = getattr(self, "non_routed_quantization", None)
+            if isinstance(nrq, dict) and nrq.get("quant_method"):
+                from vllm.model_executor.layers.quantization import (
+                    get_quantization_config,
+                )
+                for name in ("deepseek_v4_fp8", str(nrq.get("quant_method"))):
+                    try:
+                        cls = get_quantization_config(name)
+                        self._nr_delegate_cached = cls.from_config(dict(nrq))
+                        break
+                    except Exception:
+                        continue
+        return self._nr_delegate_cached
 
 
 class Exl3MoEMethod(FusedMoEMethodBase):
