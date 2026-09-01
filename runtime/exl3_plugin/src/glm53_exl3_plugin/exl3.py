@@ -46,7 +46,7 @@ MCG_MULTIPLIER = 0xCBAC1FED
 MCG_MARKER_SIGNED_INT32 = -877912083
 EXL3_SUFFIXES = ("trellis", "suh", "svh", "mcg")
 SWIGLU_LIMIT_DEFAULT = 10.0
-TEMP_ROWS_FUSED = 128
+TEMP_ROWS_FUSED = 2048
 MOE_ACT_SILU = 0
 # Shared fused scratch: decode is sequential across layers.
 _FUSED_TEMP_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = {}
