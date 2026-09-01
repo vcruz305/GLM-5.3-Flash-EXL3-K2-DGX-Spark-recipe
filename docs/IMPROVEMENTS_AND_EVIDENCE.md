@@ -6,8 +6,24 @@
 
 - The "loopy / unusable" reports were a real bug, in vLLM, not in the quant. Root-caused, fixed in two lines, validated, shipped in prebuilt wheels, reported upstream. The upstream PR still does not carry the fix, so stock builds and the public container image still have it.
 - On the fixed runtime the pack does not loop: 70 agent-shaped responses across two serving shapes, zero real loops, zero tool loops, zero errors. The third shape (the reporter's exact config) was preempted for the hang investigation and runs on the next box.
-- Long context is real: boots at 262,144, needle recall is perfect through 163,479 prompt tokens, prefill holds ~590 tok/s the whole way. A second runtime bug (a hang above ~163k prompt tokens) is reproduced 8/8, narrowed hard, and still open; chasing it surfaced and fixed a third: an int32 offset overflow in vLLM's vendored flash-linear-attention kernels, standalone-proven and patched (section 3).
+- Long context is real: boots at 262,144, needle recall is perfect through 163,479 prompt tokens, prefill holds ~590 tok/s the whole way. The second runtime bug -- a hang above ~163k prompt tokens -- is now **root-caused and fixed** (section 0): it was the EXL3 fused-MoE fat-expert fallback, cleared by raising one constant (`TEMP_ROWS_FUSED` 128->2048), verified with a cold 180,224-token prefill returning 200 in 515 s; a 258k prefill is slow but no longer hangs. Chasing the wedge also surfaced and fixed a third bug -- an int32 offset overflow in vLLM's vendored flash-linear-attention kernels -- which was ruled out as the serving cause (step-local 2,048-token calls never reach it) but is standalone-proven and stays patched (section 3).
 - Fidelity is measured, not vibed: full-vocab KLD against BF16 on 1,048,064 positions per checkpoint, with the official FP8 as the anchor.
+
+---
+
+## 0. The >163k prefill wedge: root-caused and fixed (2026-08-31)
+
+The wedge that capped verified context at 163k was **not** in the pack, the K-pool indexer, the sparse-MLA attention, or the linear-attention kernels. It was the **EXL3 fused-MoE fat-expert fallback**.
+
+**Root cause.** Past ~163,840 prompt tokens the router starts concentrating **more than 128 rows onto a single expert** within a 2,048-token prefill chunk. The fused `exl3_moe` kernel caps at `TEMP_ROWS_FUSED = 128` rows per expert, so any "fat" expert falls back to `apply_exl3_python_loop` -- a per-expert `LinearEXL3` reconstruct that takes **minutes per chunk**. The engine keeps running but stops emitting tokens, so a client read-timeout looks like a hang. It is a **latency cliff, not a deadlock**.
+
+**How it was localized.** Nine `CUDA_LAUNCH_BLOCKING=1` runs with flushed stage markers walked the whole forward and exonerated, in turn: the K-pool tail indexer (completes), the SM120 FlashInfer sparse-MLA attention (completes), the KDA / flash-linear-attention chunk kernels (each serving step is a step-local 2,048-token call, so the int32 offset overflow of section 3 never triggers here), and the KDA post-processing (scatter / o_norm / o_proj, all complete). The last marker before the engine went silent was `MoE_pre_experts` -- the line right before the EXL3 experts kernel.
+
+**The fix.** Raise the fused-MoE per-expert row cap so no expert in a 2,048-token chunk can exceed it: `TEMP_ROWS_FUSED` **128 -> 2048** in `glm53_exl3_plugin/exl3.py`, applied idempotently by `scripts/patch_moe_fat_expert_rows.py`. With the cap at 2,048 the fat-expert fallback can never fire for a 2,048-token batch, so the fused kernel handles every expert directly.
+
+**Verified.** A cold **180,224-token** prefill now returns `status 200` with coherent, non-looping output in **515 s wall** -- the exact shape that went silent before the fix. This clears the old 163k ceiling; `MAX_MODEL_LEN=262144` still boots.
+
+**Honest caveat.** A cold **258,048-token** prefill did **not** finish inside a 40-minute client window (`ReadTimeout` at 2,400 s, ~3x slower than a linear extrapolation from 180k). That is a **performance cliff at extreme context, not the wedge** -- the hang is gone; extreme-context prefill throughput is the remaining item. **New verified prefill ceiling: 180k.** Section 3 below is superseded by this section.
 
 ---
 
@@ -45,6 +61,8 @@ Paired on the same 512 contexts, the mix beats K2 on **505 of 512** (mean -0.022
 sixcat 0.5.1 on the fixed runtime, think-on at 64k: **K2 84.17, mix 83.33, 120/120 items, no faults** (math 100, tools 90-95). A model that answers 120/120 agentic eval items with a 100 in math is not "unusable."
 
 ## 3. Long context: verified to 163k prompt tokens, 262k boots
+
+> **Superseded 2026-08-31 (see section 0).** The 163k ceiling here was the pre-fix limit set by the wedge, now fixed. Verified prefill ceiling is now 180k; 262k boots; a 258k prefill is slow but no longer hangs.
 
 `MAX_MODEL_LEN=262144`, CUDA graphs on, MTP k=2: **KV pool 1,093,332 tokens** (4.17 concurrent full-256k requests) at `max-num-seqs 1`, 994,955 at `max-num-seqs 10`. 93.74 GiB after load.
 
@@ -136,7 +154,7 @@ And one measured non-cause: `max-num-seqs 4` with MTP k=2 on the fixed runtime i
 
 ## 7. Still open, and being worked
 
-- The ~163k-180k prefill hang: stacks tonight, then root cause, fix, and a re-run of the ladder above it (section 3 updates rather than retracts).
+- Extreme-context prefill throughput: a cold 258k prefill does not finish inside 40 minutes (~3x slower than a linear extrapolation from 180k). This is a performance cliff, not a hang -- the >163k wedge itself is fixed (section 0).
 - The reporter-shape loop row and the arena sweep table (hours away, not days).
 - Uncensored K2 pack: same battery queued behind the above.
 

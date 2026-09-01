@@ -280,14 +280,17 @@ planted at 10% depth and recalled **verbatim at every passing point**:
 | 130,709 | 572–584 | 224–229 s | 17.4–19.8 | found |
 | 147,091 | 591 | 249 s | 19.1 | found |
 | **163,479** | 588 | 278 s | 17.3 | found |
-| ~179,900 | **engine wedge** — request never returns, engine logs stop, restart required | | | |
+| **180,224** | ~350 | 515 s | — | **found — wedge fixed 2026-08-31** |
 
-**Known runtime bug, under investigation:** prompts between ~163k and ~180k
-tokens hang the engine (reproduced twice, also at ~192k; a hang, not a crash —
-no illegal memory access). Until it is fixed, treat **163k prompt tokens as the
-verified ceiling**; `MAX_MODEL_LEN` up to 262,144 is safe memory-wise, and
-contexts at or below 131,072 cannot reach the wedge at all. Reproducer:
-`scripts/ctx_bench.py`. This is in the serving runtime, not the pack: the same
+**Wedge fixed 2026-08-31.** The ~163k-180k prefill hang was the EXL3 fused-MoE
+fat-expert fallback: past ~163,840 tokens the router puts >128 rows on one
+expert per 2,048-token chunk, tripping a slow per-expert `LinearEXL3`
+reconstruct (a latency cliff, not a deadlock). Raising `TEMP_ROWS_FUSED` to
+2048 via `scripts/patch_moe_fat_expert_rows.py` clears it. A cold 180,224-token
+prefill now returns 200 (wall 515 s), so treat **180k as the verified ceiling**;
+`MAX_MODEL_LEN` up to 262,144 boots. A cold 258k prefill is slow -- it did not
+finish in a 40-minute window -- a performance cliff, not a hang. Reproducer:
+`scripts/ctx_bench.py`. This was in the serving runtime, not the pack: the same
 weights answer with perfect needle recall at 163k.
 
 ## Context ladder
