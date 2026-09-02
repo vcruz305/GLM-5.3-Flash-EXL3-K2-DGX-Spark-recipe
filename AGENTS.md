@@ -85,16 +85,20 @@ Full numbers and the reasoning are in [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS
 
 vLLM's `has_flashinfer()` returns False without `nvcc` on PATH and then rejects the only sparse-MLA backend for GB10 (`No valid attention backend found for cuda ... FLASHINFER_MLA_SPARSE_SM120`). `scripts/serve_one_spark.sh` adds `/usr/local/cuda-13.0/bin` itself and `scripts/preflight.py` checks it; if you launch `vllm serve` by hand, `export PATH=/usr/local/cuda-13.0/bin:$PATH` first. FlashInfer's JIT also runs `ninja` from the venv's `bin/`, so activate the venv (or put `~/venvs/glm53-exl3-local/bin` on PATH) rather than calling the venv's python by absolute path from a bare shell.
 
-## Context limits (measured 2026-08-31)
+## Context limits (measured 2026-08-31, updated 2026-09-01)
 
 `MAX_MODEL_LEN=262144` boots (KV pool 1.09M tokens on K2) and prompts up to
 **163,479 tokens are verified** with perfect needle recall (prefill ~590 tok/s,
-decode ~17–20 tok/s). **Do not send prompts above ~163k tokens yet:** a runtime
-bug wedges the engine somewhere between 163k and 180k prompt tokens — the
-request never returns, the engine's log goes silent, and the server must be
-restarted (the API port still accepts connections, so health checks lie).
-`MAX_MODEL_LEN` ≤131072 cannot hit it. Fix in progress; see the README's
-long-context section.
+decode ~17–20 tok/s). The 163k-180k wedge (fused-MoE fat-expert fallback) is
+fixed by the `TEMP_ROWS_FUSED` row cap below. A second, independent wedge past
+roughly 200k-230k prompt tokens, an allocator ratchet on GB10 unified memory
+in vLLM's sparse-indexer chunked prefill, is fixed by
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, which
+`scripts/serve_one_spark.sh` now sets by default; it is **required** for
+prefills above ~200k tokens on one Spark. A cold 258,048-token prefill is
+verified passing with that flag set (single request, pinned 3 GiB KV pool,
+speculative decoding off). See docs/IMPROVEMENTS_AND_EVIDENCE.md section 0b
+and the README's long-context section.
 
 Also field-verified: a root-owned `~/.triton/cache` (from an earlier sudo run)
 breaks the user-mode serve; chown it or set `TRITON_CACHE_DIR` to a writable dir.

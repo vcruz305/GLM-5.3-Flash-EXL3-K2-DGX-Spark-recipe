@@ -51,6 +51,8 @@ Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed 
 | Max `max-model-len` allocated | **131072** (MTP k=2, util 0.91, KV **786,432**, 6×). Context does **not** bound the known K-pool fault; see the warning below |
 | sixcat 0.5.1 | 120/120 think-on at 64k — **overall 84.1667 is flagged**, see [`docs/SIXCAT.md`](docs/SIXCAT.md) |
 
+A cold **258,048-token** single-request prefill is verified passing as of **2026-09-01**, with CUDA graphs on, a pinned 3 GiB KV pool, and speculative decoding off -- see [Long context: measured ceiling](#long-context-measured-ceiling-2026-09-01).
+
 This recipe is scoped to **2-bit routed experts on one Spark**.
 
 ---
@@ -265,7 +267,7 @@ The 8k table is **spec method A/B** (none vs DFlash k vs MTP k), not “this is 
 
 ---
 
-## Long context: measured ceiling (2026-08-31)
+## Long context: measured ceiling (2026-09-01)
 
 `MAX_MODEL_LEN=262144` boots and serves with CUDA graphs and MTP k=2:
 **KV pool 1,093,332 tokens** (4.17 concurrent full-256k requests), 93.74 GiB
@@ -281,17 +283,102 @@ planted at 10% depth and recalled **verbatim at every passing point**:
 | 147,091 | 591 | 249 s | 19.1 | found |
 | **163,479** | 588 | 278 s | 17.3 | found |
 | **180,224** | ~350 | 515 s | — | **found — wedge fixed 2026-08-31** |
+| **258,048** | ~604 | 427 s | not measured | not run -- summary task, returned 200; passes with `expandable_segments` (2026-09-01) |
 
-**Wedge fixed 2026-08-31.** The ~163k-180k prefill hang was the EXL3 fused-MoE
-fat-expert fallback: past ~163,840 tokens the router puts >128 rows on one
-expert per 2,048-token chunk, tripping a slow per-expert `LinearEXL3`
-reconstruct (a latency cliff, not a deadlock). Raising `TEMP_ROWS_FUSED` to
-2048 via `scripts/patch_moe_fat_expert_rows.py` clears it. A cold 180,224-token
-prefill now returns 200 (wall 515 s), so treat **180k as the verified ceiling**;
-`MAX_MODEL_LEN` up to 262,144 boots. A cold 258k prefill is slow -- it did not
-finish in a 40-minute window -- a performance cliff, not a hang. Reproducer:
-`scripts/ctx_bench.py`. This was in the serving runtime, not the pack: the same
-weights answer with perfect needle recall at 163k.
+**Two independent causes, not one.** The ~163k-180k hang above (fixed
+2026-08-31) was the EXL3 fused-MoE fat-expert fallback: past ~163,840 tokens
+the router puts >128 rows on one expert per 2,048-token chunk, tripping a slow
+per-expert `LinearEXL3` reconstruct. Raising `TEMP_ROWS_FUSED` to 2048 via
+`scripts/patch_moe_fat_expert_rows.py` clears it, and that fix stands --
+180,224 passes because of it. A **second, independent cause** remained and
+wedged every prefill past roughly 200k-230k tokens even with the row-cap fix
+in place.
+
+**Root cause of the second wedge: an allocator ratchet on unified memory.**
+vLLM's sparse-indexer chunked prefill
+(`vllm/v1/attention/backends/mla/indexer.py`, `split_indexer_prefill_chunks`)
+allocates an fp32 logits buffer of shape `(sub_m, N_compressed)` per
+sub-chunk, sized up to `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB` (default 512 MB in
+this fork). Because the prefix grows every 2,048-token step, each step's
+buffers are slightly larger than the last, so the PyTorch caching allocator
+never reuses freed blocks and keeps requesting new segments. On GB10 unified
+memory `cudaMalloc` never fails until the kernel itself is starved, so the
+allocator never flushes its cache (`num_alloc_retries` stays 0) and reserved
+memory ratchets up with every prefill step until host memory is exhausted
+(32 GiB reserved by 262k in the no-model replay below) -- a
+page-lock livelock (kernel stacks in `folio_wait_bit_common`), engine silent,
+`/health` still returning 200.
+
+**No-model reproducer** (`scripts/ratchet_replay.py`, 2 seconds, no weights)
+replays the same allocation pattern at L=262144, MNBT=2048, compression
+ratio 4:
+
+| config | peak reserved | segments | `num_alloc_retries` |
+|---|---:|---:|---:|
+| default allocator | 32.26 GiB | 128 | 0 |
+| `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` | 1.49 GiB | 0 | -- |
+| default allocator + `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=64` | 1.04 GiB | 27 | -- |
+
+`--max-num-batched-tokens` is **not** a lever here: smaller chunks mean more
+allocation events, same ratchet.
+
+**Live verification (2026-09-01).** Serve config:
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, KV pool pinned to 3 GiB
+(`--kv-cache-memory-bytes 3221225472`, 349,525 fp8 KV tokens -- enough for one
+262,144-token request), `MAX_MODEL_LEN=262144`, `--max-num-batched-tokens
+2048`, `--max-num-seqs 1`, `--kv-cache-dtype fp8`, prefix caching off, CUDA
+graphs on (default vLLM graph mode, no `--enforce-eager`), speculative
+decoding off, plus an opt-in venv-side indexer workspace right-sizing patch
+(`GLM53_INDEXER_WORKSPACE=rightsize`) that is **not shipped in this repo** --
+it was on during this run and has not been separated out. A cold
+258,048-token prefill returned HTTP 200 in **427.3 s wall**, about 604
+prompt tokens/s end to end (the table's prefill column is prompt tokens over
+wall, as for every other row). `MemAvailable` was
+15.0 GiB at serve-up, 13.5 GiB when prefill started, then flat between 13.82
+and 13.85 GiB for the entire prefill -- about 1.2 GiB total growth, zero
+drift over 7 minutes.
+
+The control run (identical config, no `expandable_segments`) drained
+`MemAvailable` at an accelerating 3.0-4.5 GiB/min and was aborted by a
+watchdog at a 100 MB floor before finishing. An earlier control with the
+row-cap fix and the default allocator (utilization-derived 8.39 GiB KV pool)
+passed 180,224 in 309.8 s, then hit the OOM floor (22 MB available) at
+229,376 and was aborted. All three runs had swappiness 10 and a 16 GB swap
+file present.
+
+**Fix:** `scripts/serve_one_spark.sh` now defaults
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`. **Verified prefill
+ceiling is now 258,048 tokens** on one Spark, for a single request, with the
+pinned 3 GiB KV pool and speculative decoding off. Reproducer:
+`scripts/ctx_bench.py`; ratchet reproducer: `scripts/ratchet_replay.py`.
+
+**MTP k=2 on the fixed config (2026-09-01, 9:23-9:31 PM PDT).** Same
+configuration with `SPEC_METHOD=mtp MTP_TOKENS=2` and the pool pinned to
+3758096384 bytes (3.5 GiB, 332,475 fp8 tokens with the draft layer's KV
+included): a cold 258,048-token prefill plus 512 completion tokens returned
+HTTP 200 in **463.6 s wall**; `MemAvailable` was 12.2 GiB at serve-up and
+flat at 10.59 GiB for the entire request (minimum 10.43 GiB). The wedge fix
+holds with speculation on. vLLM's 10-second logger windows during the decode
+phase read 19.0 and 20.4 tok/s with mean acceptance length 2.31 in the first
+window rising to 3.00 (every draft accepted) in the last two. Acceptance that
+climbs to 100% on a summarize task is the signature of a repetitive tail, and
+the client kept only the first 60 characters of the completion, so **no decode
+tok/s figure is claimed at 258k yet**; the next run keeps the full text.
+
+**Not yet measured on the fixed config:** decode tok/s at 258k on captured
+text, needle recall at 258k (the verification prompt was a summarize task;
+the model returned a coherent summary opening, not a needle probe), and
+`VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=64` in a live serve (replay-only so far).
+CUDA graphs are confirmed working at this config (the verification run
+captured graphs and booted with the default, non-eager graph mode). Memory
+headroom during the 258k prefill was ~13.8 GiB without MTP and ~10.6 GiB
+with it.
+
+MiaAI's TP=2 two-Spark recipe has not reported this at 256k on two boxes,
+but their PR #70 documents the same livelock at
+~236k on a 4x TP=4 setup and mitigates with `vm.swappiness=0` and a swap
+cycle between serves. That is their mitigation, not something this recipe
+verified as a root fix.
 
 ## Context ladder
 
