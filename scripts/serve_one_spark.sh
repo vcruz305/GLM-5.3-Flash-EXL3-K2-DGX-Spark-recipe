@@ -200,6 +200,12 @@ elif [[ "$SPEC_METHOD" == "dflash" ]]; then
   ARGS+=(--cudagraph-capture-sizes 1 2 4 8 16)
 fi
 
+# Opt-in torch profiler. With PROFILER_DIR set the server exposes POST /start_profile
+# and /stop_profile and writes Chrome traces under that directory. Off by default.
+if [[ -n "${PROFILER_DIR:-}" ]]; then
+  ARGS+=(--profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"$PROFILER_DIR\"}")
+fi
+
 echo "EXL3_FUSED_MOE=$EXL3_FUSED_MOE SPEC_METHOD=$SPEC_METHOD MAX_MODEL_LEN=$MAX_MODEL_LEN"
 echo "vllm ${ARGS[*]}"
 exec vllm "${ARGS[@]}"

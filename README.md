@@ -48,12 +48,72 @@ Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed 
 | Decode winner @ 8k | **MTP k=2: 15.7–16.5 tok/s**, mean accept **~2.2**, pos1 ~74–83% / pos2 ~44% |
 | Same MTP @ 64k | **14.6–15.7 tok/s** (warm 14.6, TTFT 314 ms). Same winner — slightly slower pages |
 | No-spec floor @ 8k | **9.6–9.8 tok/s** |
+| Dense-EXL3 overlay @ 8k, no spec | **17.0 tok/s** vs 9.4 for the plain pack on the same day (**1.80x**), 10 GiB less weight memory, 2.1x KV tokens. See [Dense EXL3 overlay](#dense-exl3-overlay-180x-no-spec-decode) |
+| Dense-EXL3 overlay + MTP k=2 @ 8k | **22.4 tok/s**, accept 2.23, vs 16.4 for the plain pack + MTP the same day (**1.36x**). Current best decode on one Spark |
 | Max `max-model-len` allocated | **131072** (MTP k=2, util 0.91, KV **786,432**, 6×). Context does **not** bound the known K-pool fault; see the warning below |
 | sixcat 0.5.1 | 120/120 think-on at 64k — **overall 84.1667 is flagged**, see [`docs/SIXCAT.md`](docs/SIXCAT.md) |
 
 A cold **258,048-token** single-request prefill is verified passing as of **2026-09-01**, with CUDA graphs on, a pinned 3 GiB KV pool, and speculative decoding off -- see [Long context: measured ceiling](#long-context-measured-ceiling-2026-09-01).
 
 This recipe is scoped to **2-bit routed experts on one Spark**.
+
+---
+
+## Dense EXL3 overlay: 1.80x no-spec decode
+
+The K2 pack quantizes routed experts only; attention, shared experts, the three
+dense MLPs and `lm_head` stay BF16. A decode profile of this pack on GB10
+(torch profiler trace, MTP k=2, 8k) put **47.5% of GPU time in cuBLAS BF16
+dense linears** and 36% in the EXL3 expert kernel. The overlay replaces those
+dense linears with calibrated EXL3 tensors (K4 attention and shared experts, K3
+dense MLPs) taken from a public GLM-5.3-Flash EXL3 release, without rewriting
+a single K2 shard: the new pack directory is symlinks to the K2 files plus one
+3.3 GiB safetensors file, a rewritten index and a config that declares the
+dense tensors to the plugin.
+
+Measured **2026-09-02** on one GB10, same runtime, `MAX_MODEL_LEN=8192`,
+speculative decoding **off**, greedy 256/512-token completions, both runs
+answering the identity and arithmetic probes correctly (3/3):
+
+| | Plain K2 pack | Overlay (`-denseK4`) |
+|---|---|---|
+| Decode @ 8k, no spec | 9.43 / 9.42 tok/s | **17.02 / 17.03 tok/s** (**1.80x**) |
+| Model weights in memory | 89.4 GiB | **79.29 GiB** |
+| GPU KV cache (fp8) | 114,688 tokens | **243,302 tokens** |
+| Load time (cold) | 717 s | 615 s |
+| Decode @ 8k, MTP k=2 | 16.40 / 16.55 tok/s, accept 2.19 | **22.36 / 22.12 tok/s**, accept 2.23 (**1.36x**) |
+| Weights in memory, MTP k=2 | 91.46 GiB | **81.36 GiB** |
+
+Build it (needs the [vllm-exl3](https://github.com/vcruz305/vllm-exl3) checkout
+for the tool, plugin **>= 0.2.3**, and network access to the Hub for the dense
+tensors; only their byte ranges are fetched, never whole shards):
+
+```bash
+# 1) Extract the dense tensors and assemble the overlay pack (symlinks + one new shard)
+python tools/dense_overlay.py --branch 2.05bpw   --src ~/models/GLM-5.3-Flash-EXL3-K2   --out ~/models/GLM-5.3-Flash-EXL3-K2-denseK4   --prefix-rewrite model.language_model.:language_model.model.
+python tools/dense_overlay.py --branch 2.05bpw --src ... --out ... --prefix-rewrite ... --verify   # prints DENSE_OVERLAY_OK
+
+# 2) Let the fork's attention projections see the quant config (idempotent, .orig-p2 backups)
+python scripts/patch_glm53_dense_exl3_quant_config.py
+
+# 3) Serve the overlay directory instead of the plain pack
+MODEL_DIR=~/models/GLM-5.3-Flash-EXL3-K2-denseK4 bash scripts/serve_one_spark.sh
+```
+
+Why step 2 exists: the fork builds the KDA and MLA projections with
+`quant_config=None` (fp8 checkpoints ship no scales for them), so the dense EXL3
+tensors had nowhere to load and the boot died with
+`KeyError: 'layers.0.self_attn.in_proj_qkvbfg_a.mul1'`. The patch keeps the quant
+config only when the pack declares `non_routed_exl3`; plain packs are untouched.
+When auditing another model class for the same overlay, grep it for
+`quant_config=None`.
+
+`--prefix-rewrite` maps the pack's HF-style names onto the fork's module tree
+(`language_model.model.layers.N.*`); the plugin config it writes keys every
+dense linear by its full fork prefix with `bits` and, for the fused KDA input
+projection, the shards that stay BF16 (`b`, `f_a`, `g_a`). The `--branch
+3.05bpw` tier (K5 attention, K4 dense MLPs) is the next candidate and is not
+measured yet. MTP k=2 stacks on the overlay (table above): the draft layer stays BF16, so the relative gain shrinks from 1.80x to 1.36x, and 22.4 tok/s is the best decode measured on one Spark so far.
 
 ---
 
