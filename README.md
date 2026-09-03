@@ -113,7 +113,7 @@ When auditing another model class for the same overlay, grep it for
 dense linear by its full fork prefix with `bits` and, for the fused KDA input
 projection, the shards that stay BF16 (`b`, `f_a`, `g_a`). The `--branch
 3.05bpw` tier (K5 attention, K4 dense MLPs) is the next candidate and is not
-measured yet. MTP k=2 stacks on the overlay (table above): the draft layer stays BF16, so the relative gain shrinks from 1.80x to 1.36x, and 22.4 tok/s is the best decode measured on one Spark so far.
+measured yet. MTP k=2 stacks on the overlay (table above): the relative gain shrinks from 1.80x to 1.36x, and 22.4 tok/s is the best decode measured on one Spark so far. Overlaying the draft layer's own dense linears as well (`dense_overlay.py --draft-layers 45 --draft-prefix-rewrite model.language_model.:model. --tag=-mtp`, five `model.layers.45.*` keys, 63 MB) loads and runs cleanly (2026-09-02: 22.3 / 23.2 tok/s at 256 / 512 tokens, acceptance 2.45, 0.18 GiB less weight memory) but is within noise of the BF16 draft: the draft step's remaining BF16 reads are `eh_proj` and the shared `lm_head`, not the attention and shared-expert projections. `lm_head` on EXL3 is the next lever for both the target and the draft.
 
 ---
 
