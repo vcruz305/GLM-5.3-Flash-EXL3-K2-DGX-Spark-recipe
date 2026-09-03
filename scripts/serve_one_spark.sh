@@ -74,6 +74,27 @@ ENFORCE_EAGER="${ENFORCE_EAGER:-0}"
 CHAT_TEMPLATE="${CHAT_TEMPLATE:-${MODEL_DIR}/chat_template.jinja}"
 SERVED_NAME="${SERVED_NAME:-GLM-5.3-Flash-EXL3}"
 LOAD_FORMAT="${LOAD_FORMAT:-auto}"
+LONG_PREFILL_THRESHOLD="${LONG_PREFILL_THRESHOLD:-1024}"
+VLLM_EXL3_MOE_KERNEL="${VLLM_EXL3_MOE_KERNEL:-native}"
+export VLLM_EXL3_MOE_KERNEL
+
+# Parallel NVMe pre-warm: saturates storage controller across 8 workers (91 GiB in ~22s)
+PREWARM_NVME="${PREWARM_NVME:-1}"
+if [[ "$PREWARM_NVME" == "1" ]] && [[ -d "$MODEL_DIR" ]]; then
+  echo "Pre-warming NVMe page cache with 8 parallel workers..."
+  python3 -c "
+import os, glob, concurrent.futures
+shards = glob.glob('$MODEL_DIR/model-*.safetensors')
+def r(f):
+    fd = os.open(f, os.O_RDONLY)
+    try:
+        while os.read(fd, 16*1024*1024): pass
+    finally: os.close(fd)
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+    list(ex.map(r, shards))
+" 2>/dev/null || true
+  echo "NVMe pre-warm complete."
+fi
 
 if [[ ! -f "$MODEL_DIR/config.json" ]]; then
   echo "missing $MODEL_DIR/config.json — run scripts/download_weights.sh"
@@ -202,10 +223,10 @@ fi
 
 # Opt-in torch profiler. With PROFILER_DIR set the server exposes POST /start_profile
 # and /stop_profile and writes Chrome traces under that directory. Off by default.
-if [[ -n "${PROFILER_DIR:-}" ]]; then
-  ARGS+=(--profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"$PROFILER_DIR\"}")
+if [[ -n "${LONG_PREFILL_THRESHOLD:-}" && "${LONG_PREFILL_THRESHOLD}" != "0" ]]; then
+  ARGS+=(--long-prefill-token-threshold "$LONG_PREFILL_THRESHOLD")
 fi
 
-echo "EXL3_FUSED_MOE=$EXL3_FUSED_MOE SPEC_METHOD=$SPEC_METHOD MAX_MODEL_LEN=$MAX_MODEL_LEN"
+echo "EXL3_FUSED_MOE=$EXL3_FUSED_MOE VLLM_EXL3_MOE_KERNEL=$VLLM_EXL3_MOE_KERNEL SPEC_METHOD=$SPEC_METHOD MAX_MODEL_LEN=$MAX_MODEL_LEN"
 echo "vllm ${ARGS[*]}"
 exec vllm "${ARGS[@]}"

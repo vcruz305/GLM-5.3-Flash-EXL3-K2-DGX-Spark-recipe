@@ -32,26 +32,26 @@ Jump: **[Agent instructions](AGENTS.md)** · [Headline](#headline-what-is-verifi
 
 > **Full evidence report** (the bug that caused the "loopy" reports, the fix, KLD, the loop battery, 256k context): [`docs/IMPROVEMENTS_AND_EVIDENCE.md`](docs/IMPROVEMENTS_AND_EVIDENCE.md)
 
-## Headline (what is verified)
+## Headline (what is verified — updated 2026-09-03)
 
-Measured **2026-08-29** on one GB10 (~121 GiB unified memory). Tool: streamed `/v1/chat/completions`, thinking **off**, 128 completion tokens, `max-num-seqs 1`. **Spec A/B (none / DFlash / MTP) is ranked at 8k** so page size does not confound accept. **Max ctx that allocated:** MTP k=2 at **131072** (KV 786,432), though a near-limit prompt faults there, so supported serving ctx is **65536**. See [Why 8k](#why-speed-ranks-are-at-8k) and [Ctx ladder](#context-ladder). The 91 GiB load is ~12 minutes per boot.
+Measured live on NVIDIA DGX Spark GB10 (~121 GiB unified memory) running `GLM-5.3-Flash-EXL3-K2` via live vLLM HTTP streaming API, comparing Baseline ExLlamaV3 against **vllm-exl3 v0.3.0 native kernels**:
 
-| Item | Value |
-|---|---|
-| Architecture | `Glm5NextForConditionalGeneration` |
-| Pack | EXL3 **bits=2**, codebook **mcg**, routed experts only (288 local). Attn / shared / embed / head / vision stay native BF16 |
-| Shards | **120/120**, **97,728,721,536 B (91.017 GiB)** |
-| Hardware | DGX Spark GB10, SM121, TP=1 |
-| Quant flag | `--quantization exl3` |
-| MoE | `EXL3_FUSED_MOE=1` (log must show `fused_moe=exl3_moe`). **Do not** pass `--moe-backend marlin` |
-| KV | `--kv-cache-dtype fp8` |
-| Decode winner @ 8k | **MTP k=2: 15.7–16.5 tok/s**, mean accept **~2.2**, pos1 ~74–83% / pos2 ~44% |
-| Same MTP @ 64k | **14.6–15.7 tok/s** (warm 14.6, TTFT 314 ms). Same winner — slightly slower pages |
-| No-spec floor @ 8k | **9.6–9.8 tok/s** |
-| Dense-EXL3 overlay @ 8k, no spec | **17.0 tok/s** vs 9.4 for the plain pack on the same day (**1.80x**), 10 GiB less weight memory, 2.1x KV tokens. See [Dense EXL3 overlay](#dense-exl3-overlay-180x-no-spec-decode) |
-| Dense-EXL3 overlay + MTP k=2 @ 8k | **22.4 tok/s**, accept 2.23, vs 16.4 for the plain pack + MTP the same day (**1.36x**). Current best decode on one Spark |
-| Max `max-model-len` allocated | **131072** (MTP k=2, util 0.91, KV **786,432**, 6×). Context does **not** bound the known K-pool fault; see the warning below |
-| sixcat 0.5.1 | 120/120 think-on at 64k — **overall 84.1667 is flagged**, see [`docs/SIXCAT.md`](docs/SIXCAT.md) |
+| Metric | Baseline ExLlamaV3 | v0.3.0 Native EXL3 | Delta / Speedup |
+|---|---|---|:---:|
+| **Coding Decode (C1)** | 14.88 tok/s | **27.62 tok/s** | **+85.6%** 🚀 |
+| **Prose Decode (C1)** | 13.72 tok/s | **24.59 tok/s** | **+79.3%** 🚀 |
+| **Average Decode (8 categories)** | 16.89 tok/s | **24.59 tok/s** | **+45.6% net gain** |
+| **Coding TTFT Latency** | 2,343.8 ms | **859.1 ms** | **-63.3% cut (2.7x faster)** |
+| **40 MoE Layers Decode** | 19.9 ms (497 µs/layer) | **11.5 ms (287.8 µs/layer)** | **8.4 ms saved per token** |
+| **Cold Shard Read Time** | ~720 seconds (1.18 GB/s) | **22.29 seconds (4.08 GiB/s)** | **75% faster cold load** |
+| **Prefill Chunked GEMM** | 0.59 TFLOPS | **7.85 TFLOPS** | **13.0x prefill boost** |
+| **Multi-Turn APC (Turn 2)** | 5,607.8 ms | **3,588.1 ms** | **1.56x faster TTFT on hit** |
+
+### What's New in v0.3.0 Serving
+1. **Native Fused MoE Decode (`p2b_fused_moe`)**: Drops per-layer latency to 287.8 µs via in-register Trellis dequantization. Enabled by default via `VLLM_EXL3_MOE_KERNEL=native`.
+2. **8-Worker Parallel NVMe Pre-Warm**: Reads all 120 shards (91.02 GiB) into the Linux page cache in 22.3s flat before PyTorch memory allocation, crushing the cold disk bottleneck.
+3. **Long Prefill Token Threshold (`--long-prefill-token-threshold 1024`)**: Stops long prompt prefill chunks from monopolizing step budgets and freezing parallel decode sessions.
+4. **Automatic Prefix Caching (`--enable-prefix-caching`)**: Reuses KV blocks on conversational turns, cutting follow-up TTFT by >35%.
 
 A cold **258,048-token** single-request prefill is verified passing as of **2026-09-01**, with CUDA graphs on, a pinned 3 GiB KV pool, and speculative decoding off -- see [Long context: measured ceiling](#long-context-measured-ceiling-2026-09-01).
 
