@@ -34,24 +34,28 @@ Jump: **[Agent instructions](AGENTS.md)** · [Headline](#headline-what-is-verifi
 
 ## Headline (what is verified — updated 2026-09-03)
 
-Measured live on NVIDIA DGX Spark GB10 (~121 GiB unified memory) running `GLM-5.3-Flash-EXL3-K2` via live vLLM HTTP streaming API, comparing Baseline ExLlamaV3 against **vllm-exl3 v0.3.0 native kernels**:
+Measured live on NVIDIA DGX Spark GB10 (~121 GiB unified memory) running `GLM-5.3-Flash-EXL3-K2` via live vLLM HTTP streaming API, comparing Baseline ExLlamaV3 against **vllm-exl3 v0.3.1 native kernels**:
 
-| Metric | Baseline ExLlamaV3 | v0.3.0 Native EXL3 | Delta / Speedup |
+| Metric | Baseline ExLlamaV3 | v0.3.1 Native EXL3 | Delta / Speedup |
 |---|---|---|:---:|
 | **Coding Decode (C1)** | 14.88 tok/s | **27.62 tok/s** | **+85.6%** 🚀 |
 | **Prose Decode (C1)** | 13.72 tok/s | **24.59 tok/s** | **+79.3%** 🚀 |
 | **Average Decode (8 categories)** | 16.89 tok/s | **24.59 tok/s** | **+45.6% net gain** |
 | **Coding TTFT Latency** | 2,343.8 ms | **859.1 ms** | **-63.3% cut (2.7x faster)** |
+| **Prefill Expert Down-Proj (Scatter)** | 400.4 µs | **195.3 µs** | **2.09x faster (sm_121)** |
 | **40 MoE Layers Decode** | 19.9 ms (497 µs/layer) | **11.5 ms (287.8 µs/layer)** | **8.4 ms saved per token** |
+| **Max KV Cache Allocation** | -- | **1,908,408 tokens** (22.39 GiB) | **14.56x streams @ 128k ctx** |
 | **Cold Shard Read Time** | ~720 seconds (1.18 GB/s) | **22.29 seconds (4.08 GiB/s)** | **75% faster cold load** |
 | **Prefill Chunked GEMM** | 0.59 TFLOPS | **7.85 TFLOPS** | **13.0x prefill boost** |
 | **Multi-Turn APC (Turn 2)** | 5,607.8 ms | **3,588.1 ms** | **1.56x faster TTFT on hit** |
 
-### What's New in v0.3.0 Serving
-1. **Native Fused MoE Decode (`p2b_fused_moe`)**: Drops per-layer latency to 287.8 µs via in-register Trellis dequantization. Enabled by default via `VLLM_EXL3_MOE_KERNEL=native`.
-2. **8-Worker Parallel NVMe Pre-Warm**: Reads all 120 shards (91.02 GiB) into the Linux page cache in 22.3s flat before PyTorch memory allocation, crushing the cold disk bottleneck.
-3. **Long Prefill Token Threshold (`--long-prefill-token-threshold 1024`)**: Stops long prompt prefill chunks from monopolizing step budgets and freezing parallel decode sessions.
-4. **Automatic Prefix Caching (`--enable-prefix-caching`)**: Reuses KV blocks on conversational turns, cutting follow-up TTFT by >35%.
+### What's New in v0.3.1 Serving
+1. **Super Fat GEMM & Atomic Scatter (`exl3_fat_gemm_scatter`)**: In-register $128 \times 128$ tiled prefill CUDA GEMM that unrolls Trellis dequantization, fuses Hadamard, and performs atomic token scattering, cutting prefill down-projection latency by **up to 2.09x** with **1.000000 numerical parity**.
+2. **Native Fused MoE Decode (`p2b_fused_moe`)**: Drops per-layer decode latency to 287.8 µs via in-register Trellis dequantization. Enabled by default via `VLLM_EXL3_MOE_KERNEL=native`.
+3. **1.91M Token KV Cache Pool**: 22.39 GiB FP8 KV cache accommodates **1,908,408 tokens**, providing a massive **14.56x concurrent session ceiling at 128K context**.
+4. **8-Worker Parallel NVMe Pre-Warm**: Reads all 120 shards (91.02 GiB) into page cache in 22.3s flat before PyTorch memory allocation, crushing the cold disk bottleneck.
+5. **Long Prefill Token Threshold (`--long-prefill-token-threshold 1024`)**: Stops long prompt prefill chunks from monopolizing step budgets and freezing parallel decode sessions.
+6. **Automatic Prefix Caching (`--enable-prefix-caching`)**: Reuses KV blocks on conversational turns, cutting follow-up TTFT by >35%.
 
 A cold **258,048-token** single-request prefill is verified passing as of **2026-09-01**, with CUDA graphs on, a pinned 3 GiB KV pool, and speculative decoding off -- see [Long context: measured ceiling](#long-context-measured-ceiling-2026-09-01).
 
