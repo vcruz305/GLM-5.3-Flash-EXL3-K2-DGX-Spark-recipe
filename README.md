@@ -1,5 +1,17 @@
 # GLM-5.3-Flash EXL3 K2 on one NVIDIA DGX Spark
 
+> ### Built on the work of others
+>
+> The EXL3 trellis format, the MCG codebook and the quantization method are [ExLlamaV3](https://github.com/turboderp/exllamav3) by Turboderp ([@turboderp](https://github.com/turboderp)).
+>
+> `runtime/exl3_plugin/src/glm53_exl3_plugin/exl3.py` is **substantially derived from** the
+> `overlay/exl3.py` of [Mia's AI Lab](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks) ([@MiaAI-Lab](https://github.com/MiaAI-Lab), [@plotarmordev](https://github.com/plotarmordev)), which they published on 2026-08-27, before this repository existed.
+> About **83%** of its substantive lines are shared with theirs.
+>
+> Both projects are MIT licensed. Their notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+> and must be kept with the code. Earlier releases here shipped without those notices, which was our
+> mistake. Thank you to both projects for the work this is built on.
+
 Reproducible **vLLM** recipe for **[vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2)** on a **single NVIDIA DGX Spark / GB10 (SM121)**.
 
 Install the prebuilt runtime, download the Hub pack, and run `vllm serve`. Start with `python scripts/preflight.py`; it takes a second and tells you what is missing. Agents should read [`AGENTS.md`](AGENTS.md) first.
