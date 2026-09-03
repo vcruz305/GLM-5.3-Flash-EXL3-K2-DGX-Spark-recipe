@@ -1,3 +1,11 @@
+"""Substantially derived from Mia's AI Lab (@MiaAI-Lab), overlay/exl3.py in
+GLM-5.3-Flash-EXL3-2x-DGX-Sparks, first published 2026-08-27, which precedes this
+repository. Copyright (c) 2026 Mia's AI Lab, MIT. See THIRD_PARTY_NOTICES.md.
+
+The EXL3 trellis format, the MCG codebook and the quantization method are
+ExLlamaV3's work by Turboderp (@turboderp), Copyright (c) 2025, MIT.
+"""
+
 # SPDX-License-Identifier: Apache-2.0
 """EXL3/MCG trellis quantization for GLM-5.3-Flash routed experts.
 

@@ -589,6 +589,22 @@ Three pieces, and you need all three:
 | **this repo** | preflight, install, serve, bench, and the measurement log |
 | [**GLM-5.3-Flash-EXL3-K2K3-mix**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix) + [its recipe](https://github.com/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix-DGX-Spark-recipe) | the K2 base with six layers at K3; measured against K2 on the same runtime |
 
+## Credits and upstream work
+
+This work builds on other people's, and two projects in particular.
+
+**ExLlamaV3 by Turboderp ([@turboderp](https://github.com/turboderp/exllamav3)).** The EXL3 trellis
+format, the MCG codebook and the quantization method are theirs. MIT, Copyright (c) 2025 Turboderp.
+
+**GLM-5.3-Flash-EXL3-2x-DGX-Sparks by Mia's AI Lab
+([@MiaAI-Lab](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks)), with
+[@plotarmordev](https://github.com/plotarmordev).** `runtime/exl3_plugin/src/glm53_exl3_plugin/exl3.py` is substantially derived from their `overlay/exl3.py`, published 2026-08-27, before this repository existed. About 83% of its substantive lines are shared with theirs. MIT, Copyright (c) 2026 Mia's AI Lab.
+
+Both licences require their notices to travel with the code. Those notices are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and must be retained on redistribution. Earlier
+releases of this repository carried this without those notices. That was our oversight, and this
+section corrects it.
+
 ## License / attribution
 
 MIT for the scripts and notes in this repo. Weights are **not** redistributed — pull them from Hugging Face and respect the GLM-5.3-Flash license. vLLM, ExLlama EXL3, FlashInfer, and sixcat-eval have their own licenses.
