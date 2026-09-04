@@ -49,7 +49,7 @@ def main() -> int:
     args = parser.parse_args()
     r = Result()
 
-    print("GLM-5.3-Flash EXL3 K2 preflight\n")
+    print("GLM-5.3-Flash EXL3 (K2 & K2/K3-mix) preflight\n")
 
     machine = platform.machine()
     r.check("arch aarch64", machine == "aarch64", machine)
@@ -139,6 +139,10 @@ def main() -> int:
         r.check("fused exl3_moe kernel", fused, "present" if fused else "MISSING")
 
     model_dir: Path = args.model_dir
+    if not model_dir.exists():
+        alt = Path.home() / "models" / "GLM-5.3-Flash-EXL3-K2K3-mix"
+        if alt.exists():
+            model_dir = alt
     if model_dir.exists():
         shards = len(list(model_dir.glob("*.safetensors")))
         total = sum(p.stat().st_size for p in model_dir.glob("*.safetensors"))

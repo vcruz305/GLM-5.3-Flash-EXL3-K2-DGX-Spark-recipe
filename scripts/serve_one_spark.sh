@@ -27,7 +27,15 @@ if ! command -v nvcc >/dev/null 2>&1; then
   exit 1
 fi
 
-MODEL_DIR="${MODEL_DIR:-${HOME}/models/GLM-5.3-Flash-EXL3-K2}"
+if [[ -z "${MODEL_DIR:-}" ]]; then
+  if [[ -d "${HOME}/models/GLM-5.3-Flash-EXL3-K2" ]]; then
+    MODEL_DIR="${HOME}/models/GLM-5.3-Flash-EXL3-K2"
+  elif [[ -d "${HOME}/models/GLM-5.3-Flash-EXL3-K2K3-mix" ]]; then
+    MODEL_DIR="${HOME}/models/GLM-5.3-Flash-EXL3-K2K3-mix"
+  else
+    MODEL_DIR="${HOME}/models/GLM-5.3-Flash-EXL3-K2"
+  fi
+fi
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8888}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"

@@ -1,4 +1,4 @@
-# GLM-5.3-Flash EXL3 K2 on one NVIDIA DGX Spark
+# GLM-5.3-Flash EXL3 (K2 & K2/K3-mix) on one NVIDIA DGX Spark
 
 > ### Built on the work of others
 >
@@ -12,9 +12,9 @@
 > and must be kept with the code. Earlier releases here shipped without those notices, which was our
 > mistake. Thank you to both projects for the work this is built on.
 
-Reproducible **vLLM** recipe for **[vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2)** on a **single NVIDIA DGX Spark / GB10 (SM121)**.
+Reproducible **vLLM** recipe for **[vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2)** and **[vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix)** on a **single NVIDIA DGX Spark / GB10 (SM121)**. This recipe directly supports both the standard K2 pack (pure 2-bit routed experts) and the mixed K2/K3 pack (six routed-expert layers at K3, 2.14 bpw effective).
 
-Install the prebuilt runtime, download the Hub pack, and run `vllm serve`. Start with `python scripts/preflight.py`; it takes a second and tells you what is missing. Agents should read [`AGENTS.md`](AGENTS.md) first.
+Install the prebuilt runtime, download either Hub pack, and run `vllm serve`. Start with `python scripts/preflight.py`; it takes a second and tells you what is missing. Agents should read [`AGENTS.md`](AGENTS.md) first.
 
 > ### K-pool tail bug: fixed in the 2026-08-30 wheels
 >
@@ -32,11 +32,11 @@ Install the prebuilt runtime, download the Hub pack, and run `vllm serve`. Start
 | What | Where |
 |---|---|
 | **Runtime** | [vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm) — prebuilt wheels, install in minutes |
-| **Pack** | [vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2) — 120 shards, 91.017 GiB |
-| **Plugin** | [vcruz305/vllm-exl3 >= 0.3.1](https://github.com/vcruz305/vllm-exl3/releases/tag/v0.3.1): canonical EXL3 quantization plugin (`--quantization exl3`) with native sm_121 Blackwell fused MoE and Super Fat GEMM prefill |
-| **This repo** | install scripts, serve flags, and [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md) |
+| **Packs** | • Regular K2: [vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2) — 120 shards, 91.017 GiB<br>• Mixed K2/K3: [vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix) — 120 shards (layers 24, 27, 35, 37, 42, 45 at K3) |
+| **Plugin** | [vcruz305/vllm-exl3 >= 0.3.1](https://github.com/vcruz305/vllm-exl3/releases/tag/v0.3.1): canonical EXL3 quantization plugin (`--quantization exl3`) with native sm_121 Blackwell fused MoE, Super Fat GEMM prefill, and per-layer K support |
+| **This repo** | install scripts, serve flags, and [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md) (covers both regular K2 and K2/K3 mix) |
 | Source | [zai-org/GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash) BF16 |
-| Engine | vLLM + vllm-exl3 >= 0.3.1, `--quantization exl3`, TP=1. **Stock vLLM cannot load this pack** |
+| Engine | vLLM + vllm-exl3 >= 0.3.1, `--quantization exl3`, TP=1. **Stock vLLM cannot load these packs** |
 | Spec | **native MTP k=2** (in the checkpoint). Do not mix with a DFlash sidecar |
 
 Jump: **[Agent instructions](AGENTS.md)** · [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) · [Download](#2-download-the-pack) · [Serve](#3-serve) · [Smoke](#4-identity-smoke) · [Speed](#speed-leaderboard-same-prompt) · [Why 8k](#why-speed-ranks-are-at-8k) · [Ctx ladder](#context-ladder) · [Sixcat](#sixcat-051) · [Full eval report](docs/SIXCAT.md) · [Pitfalls](#failures-already-paid-for)
@@ -219,17 +219,26 @@ how the runtime was installed. That is the 91 GiB, not a hang.
 
 ### 2. Download the pack
 
-[`scripts/download_weights.sh`](scripts/download_weights.sh):
+This recipe supports both the standard **K2** pack and the higher-precision **K2/K3 mixed** pack (which runs 6 routed-expert layers at K3 for 2.14 bpw effective):
 
+* **Standard K2 pack** ([vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2)):
 ```bash
 hf download vcruz305/GLM-5.3-Flash-EXL3-K2 \
   --local-dir ~/models/GLM-5.3-Flash-EXL3-K2
 ```
+or `bash scripts/download_weights.sh`
+
+* **Mixed K2/K3 pack** ([vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix)):
+```bash
+hf download vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix \
+  --local-dir ~/models/GLM-5.3-Flash-EXL3-K2K3-mix
+```
+or `MODEL_ID=vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix DEST=~/models/GLM-5.3-Flash-EXL3-K2K3-mix bash scripts/download_weights.sh`
 
 Last path component **must** be the Hub basename. No `KEEP` / `HOLD` / `STASH`.  
 `hf download` resumes via `--local-dir`. There is **no** `--resume-download` flag (it errors). Never `--force-download` a partial dest.
 
-Expect **120** `*.safetensors` and **97,728,721,536** bytes.
+Both packs contain **120** `*.safetensors` and **97,728,721,536** bytes.
 
 Optional DFlash2 ladder checkpoint:
 
@@ -240,17 +249,21 @@ bash scripts/download_dflash2.sh
 ### 3. Serve
 
 Patch the model-provided template once, activate the local runtime, and launch
-exactly one speculative method:
+with native MTP k=2:
 
 ```bash
 source ~/venvs/glm53-exl3-local/bin/activate
-python scripts/patch_chat_template_thinking.py \
-  ~/models/GLM-5.3-Flash-EXL3-K2/chat_template.jinja
 
-# Current default: native MTP k=2 at the speed-ranking context.
-SPEC_METHOD=mtp MTP_TOKENS=2 MAX_MODEL_LEN=8192 GPU_MEM_UTIL=0.87 \
-  bash scripts/serve_one_spark.sh
+# For Standard K2:
+python scripts/patch_chat_template_thinking.py ~/models/GLM-5.3-Flash-EXL3-K2/chat_template.jinja
+SPEC_METHOD=mtp MTP_TOKENS=2 MAX_MODEL_LEN=8192 GPU_MEM_UTIL=0.87 bash scripts/serve_one_spark.sh
+
+# For Mixed K2/K3:
+python scripts/patch_chat_template_thinking.py ~/models/GLM-5.3-Flash-EXL3-K2K3-mix/chat_template.jinja
+MODEL_DIR=~/models/GLM-5.3-Flash-EXL3-K2K3-mix SPEC_METHOD=mtp MTP_TOKENS=2 MAX_MODEL_LEN=65536 MAX_NUM_SEQS=1 bash scripts/serve_one_spark.sh
 ```
+
+When serving the mixed K2/K3 pack, the load log will show `EXL3 per-layer K override ... bits=3` for the six K3 layers (24, 27, 35, 37, 42, 45) and `fused_moe=exl3_moe`.
 
 | Flag | Why |
 |---|---|
@@ -604,9 +617,9 @@ Three pieces, and you need all three:
 |---|---|
 | [**vllm-exl3**](https://github.com/vcruz305/vllm-exl3) | the EXL3 plugin's canonical home: source, releases, issues. The wheel below is its distribution mirror |
 | [**spark-vllm**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm) | prebuilt vLLM + ExLlamaV3 + EXL3 plugin wheels for GB10. This is one runtime, not two: vLLM is the engine, ExLlamaV3 supplies the CUDA kernels that decode the 2-bit trellis weights |
-| [**GLM-5.3-Flash-EXL3-K2**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2) | the weights |
-| **this repo** | preflight, install, serve, bench, and the measurement log |
-| [**GLM-5.3-Flash-EXL3-K2K3-mix**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix) + [its recipe](https://github.com/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix-DGX-Spark-recipe) | the K2 base with six layers at K3; measured against K2 on the same runtime |
+| [**GLM-5.3-Flash-EXL3-K2**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2) | standard K2 pack (pure 2-bit routed experts, 120 shards, 91.017 GiB) |
+| [**GLM-5.3-Flash-EXL3-K2K3-mix**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix) | mixed K2/K3 pack (six layers at K3, 2.14 bpw effective, 120 shards); natively supported by this same recipe |
+| **this repo** | preflight, install, serve, bench, and the measurement log for both packs |
 
 ## Credits and upstream work
 

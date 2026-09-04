@@ -16,8 +16,8 @@ if ! command -v hf >/dev/null 2>&1; then
 fi
 
 base="$(basename "$DEST")"
-if [[ "$base" != "GLM-5.3-Flash-EXL3-K2" ]]; then
-  echo "DEST basename should be GLM-5.3-Flash-EXL3-K2, got: $base"
+if [[ "$base" != "GLM-5.3-Flash-EXL3-K2" && "$base" != "GLM-5.3-Flash-EXL3-K2K3-mix" ]]; then
+  echo "DEST basename should be GLM-5.3-Flash-EXL3-K2 or GLM-5.3-Flash-EXL3-K2K3-mix, got: $base"
   exit 1
 fi
 

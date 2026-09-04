@@ -219,7 +219,7 @@ And one measured non-cause: `max-num-seqs 4` with MTP k=2 on the fixed runtime i
 | K-pool tail fix, two lines | `scripts/patch_kpool_tail_positions.py`, prebuilt wheels, upstream comment |
 | bounds detector + 12k-token soak gate | `scripts/patch_kpool_tail_detector.py`, `scripts/soak.sh` (gate: publish nothing that has not survived a long-generation soak) |
 | KLD pipeline (capture on the serving path + full-vocab scorer) | `scripts/kld/`, results in [`KLD.md`](KLD.md) |
-| K2/K3 mix: merged, validated, published, measured better than K2 on 505/512 contexts | [weights](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix), [recipe](https://github.com/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix-DGX-Spark-recipe) |
+| K2/K3 mix: merged, validated, published, measured better than K2 on 505/512 contexts | [weights](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix), [recipe (supported in this repo)](../README.md#2-download-the-pack) |
 | long-context bench with needle + prefill/decode | `scripts/ctx_bench.py`, section 3 |
 | loop battery, agent-shaped | `scripts/loop_bench.py`, section 4 |
 | deployment traps found and guarded: nvcc on PATH, venv ninja, both kill FlashInfer's backend selection with a misleading error | `scripts/preflight.py`, `scripts/serve_one_spark.sh`, `AGENTS.md`, README failures table |
