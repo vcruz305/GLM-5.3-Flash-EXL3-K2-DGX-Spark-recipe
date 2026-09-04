@@ -2,6 +2,7 @@
 """Disable x86-only ExLlamaV3 CPU paths for its ARM64 CUDA build."""
 from __future__ import annotations
 
+import argparse
 import platform
 import sys
 from pathlib import Path
@@ -13,11 +14,26 @@ def write(path: Path, source: str) -> None:
 
 
 def main() -> None:
-    if platform.machine() not in {"aarch64", "arm64"}:
-        raise SystemExit(f"refusing ARM64 patch on {platform.machine()}")
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: patch_exllamav3_aarch64.py EXLLAMAV3_EXT_DIR")
-    root = Path(sys.argv[1]).resolve()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "exllamav3_ext_dir",
+        type=Path,
+        help="Path to exllamav3/exllamav3_ext directory containing bindings.cpp",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Apply patches even if current host machine is not aarch64 (for testing/cross-compilation)",
+    )
+    args = parser.parse_args()
+
+    machine = platform.machine().lower()
+    if not args.force and machine not in {"aarch64", "arm64"}:
+        raise SystemExit(
+            f"refusing ARM64 patch on host architecture '{machine}'. Pass --force to bypass."
+        )
+
+    root = args.exllamav3_ext_dir.resolve()
     if not (root / "bindings.cpp").is_file():
         raise SystemExit(f"not an ExLlamaV3 extension source directory: {root}")
 
@@ -109,6 +125,9 @@ bool exl3_moe_cpu_has_avx512_vbmi() { return false; }
 
     for relative in ("cpu/moe_handoff.cu", "parallel/all_reduce_cpu.cu"):
         path = root / relative
+        if not path.is_file():
+            print(f"skipping {relative} (file not present)")
+            continue
         source = path.read_text(encoding="utf-8")
         old = """#ifdef __linux__
     __builtin_ia32_pause();

@@ -2,17 +2,29 @@
 """Fail fast unless the local Spark runtime has every required component."""
 from __future__ import annotations
 
+import argparse
 from importlib.metadata import version
-
-import torch
 
 
 def main() -> None:
-    if not torch.cuda.is_available():
-        raise SystemExit("CUDA is not available")
-    capability = torch.cuda.get_device_capability()
-    if capability != (12, 1):
-        raise SystemExit(f"expected GB10 SM121, got capability {capability}")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--allow-cpu",
+        action="store_true",
+        help="Skip strict GB10 SM121 CUDA check (for test environments)",
+    )
+    args = parser.parse_args()
+
+    import torch
+
+    if not args.allow_cpu:
+        if not torch.cuda.is_available():
+            raise SystemExit("CUDA is not available")
+        capability = torch.cuda.get_device_capability()
+        if capability != (12, 1):
+            raise SystemExit(f"expected GB10 SM121, got capability {capability}")
+    else:
+        print("running in --allow-cpu mode (skipping GB10 SM121 hardware requirement)")
 
     from vllm.plugins import load_general_plugins
 

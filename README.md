@@ -2,7 +2,7 @@
 
 > ### Built on the work of others
 >
-> The EXL3 trellis format, the MCG codebook and the quantization method are [ExLlamaV3](https://github.com/turboderp/exllamav3) by Turboderp ([@turboderp](https://github.com/turboderp)).
+> The EXL3 trellis format, the MCG codebook and the quantization method are [ExLlamaV3](https://github.com/turboderp-org/exllamav3) by Turboderp ([@turboderp](https://github.com/turboderp)).
 >
 > `runtime/exl3_plugin/src/glm53_exl3_plugin/exl3.py` is **substantially derived from** the
 > `overlay/exl3.py` of [Mia's AI Lab](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks) ([@MiaAI-Lab](https://github.com/MiaAI-Lab), [@plotarmordev](https://github.com/plotarmordev)), which they published on 2026-08-27, before this repository existed.
@@ -605,7 +605,7 @@ Three pieces, and you need all three:
 
 This work builds on other people's, and two projects in particular.
 
-**ExLlamaV3 by Turboderp ([@turboderp](https://github.com/turboderp/exllamav3)).** The EXL3 trellis
+**ExLlamaV3 by Turboderp ([@turboderp](https://github.com/turboderp-org/exllamav3)).** The EXL3 trellis
 format, the MCG codebook and the quantization method are theirs. MIT, Copyright (c) 2025 Turboderp.
 
 **GLM-5.3-Flash-EXL3-2x-DGX-Sparks by Mia's AI Lab

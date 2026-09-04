@@ -1,0 +1,157 @@
+name: CI Validation & Runtime Quality
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  lint-and-syntax:
+    name: Lint & Script Syntax Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Validate Shell Scripts Syntax
+        run: |
+          echo "Validating bash syntax on all shell scripts..."
+          for f in scripts/*.sh; do
+            echo "Checking $f"
+            bash -n "$f"
+          done
+
+      - name: Run ShellCheck on Shell Scripts
+        run: |
+          echo "Running shellcheck on shell scripts..."
+          # SC1091 (not following external sources), SC2086 (word splitting in intentional arrays/args)
+          shellcheck -e SC1091,SC2086 scripts/*.sh
+
+      - name: Validate Python Scripts Compilation
+        run: |
+          echo "Validating Python bytecode compilation..."
+          for f in scripts/*.py; do
+            echo "Compiling $f"
+            python -m py_compile "$f"
+          done
+
+  doc-integrity-and-links:
+    name: Documentation Integrity & Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify Canonical URLs & Local File References
+        run: |
+          python - << 'EOF'
+          import os, re, sys
+          from pathlib import Path
+
+          readme_path = Path("README.md")
+          content = readme_path.read_text(encoding="utf-8")
+
+          # 1. Assert no legacy turboderp/ URL (must be turboderp-org)
+          bad_urls = re.findall(r'https?://github\.com/turboderp/exllamav3[^\s\)\"\`\>]*', content)
+          if bad_urls:
+              print(f"FAILED: Found legacy turboderp URL without -org: {bad_urls}", file=sys.stderr)
+              sys.exit(1)
+          print("PASSED: All ExLlamaV3 URLs use canonical turboderp-org namespace.")
+
+          # 2. Assert local file links exist
+          local_links = re.findall(r'\[.*?\]\((?!https?://)(.*?)\)', content)
+          missing = []
+          for link in local_links:
+              # strip anchor fragments
+              clean = link.split("#")[0].strip()
+              if clean and not Path(clean).exists():
+                  missing.append(link)
+          if missing:
+              print(f"FAILED: Missing local file links referenced in README: {missing}", file=sys.stderr)
+              sys.exit(1)
+          print(f"PASSED: All {len(local_links)} local documentation file references exist.")
+          EOF
+
+  exllamav3-aarch64-patch-test:
+    name: ExLlamaV3 aarch64 Patch Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Clone Canonical ExLlamaV3
+        run: |
+          git clone --depth 1 https://github.com/turboderp-org/exllamav3.git /tmp/exllamav3_test
+
+      - name: Execute patch_exllamav3_aarch64.py
+        run: |
+          python scripts/patch_exllamav3_aarch64.py /tmp/exllamav3_test/exllamav3/exllamav3_ext --force
+
+      - name: Assert x86 Intrinsics Guarded & ARM64 Yield Replaced
+        run: |
+          EXT_DIR="/tmp/exllamav3_test/exllamav3/exllamav3_ext"
+          
+          # Check moe_handoff.cu (unconditional Linux x86 pause must be replaced by yield for ARM64)
+          if grep -q "#ifdef __linux__" "$EXT_DIR/cpu/moe_handoff.cu"; then
+            echo "FAILED: unpatched #ifdef __linux__ still present in cpu/moe_handoff.cu!" >&2
+            exit 1
+          fi
+          if ! grep -q "std::this_thread::yield" "$EXT_DIR/cpu/moe_handoff.cu"; then
+            echo "FAILED: std::this_thread::yield not found in cpu/moe_handoff.cu!" >&2
+            exit 1
+          fi
+
+          # Check all_reduce_cpu.cu
+          if grep -q "#ifdef __linux__" "$EXT_DIR/parallel/all_reduce_cpu.cu"; then
+            echo "FAILED: unpatched #ifdef __linux__ still present in parallel/all_reduce_cpu.cu!" >&2
+            exit 1
+          fi
+          if ! grep -q "std::this_thread::yield" "$EXT_DIR/parallel/all_reduce_cpu.cu"; then
+            echo "FAILED: std::this_thread::yield not found in parallel/all_reduce_cpu.cu!" >&2
+            exit 1
+          fi
+
+          # Check AVX stubs
+          if ! grep -q "bool is_avx2_supported() { return false; }" "$EXT_DIR/avx2_target.cpp"; then
+            echo "FAILED: avx2_target.cpp stub missing or malformed!" >&2
+            exit 1
+          fi
+
+          echo "SUCCESS: ExLlamaV3 aarch64 patcher verified against upstream repository."
+
+  preflight-smoke-test:
+    name: Preflight Check Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test preflight --help and argument parsing
+        run: |
+          python scripts/preflight.py --help
+          python scripts/verify_runtime.py --help

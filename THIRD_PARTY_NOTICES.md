@@ -40,7 +40,7 @@ SOFTWARE.
 
 ## Turboderp (@turboderp), ExLlamaV3
 
-https://github.com/turboderp/exllamav3
+https://github.com/turboderp-org/exllamav3
 
 The EXL3 trellis format, the MCG codebook and the quantization method are ExLlamaV3's work. This
 project serves packs in that format and calls its extension.
