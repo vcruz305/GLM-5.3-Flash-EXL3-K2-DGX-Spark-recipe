@@ -119,9 +119,16 @@ def main() -> int:
             r.check(
                 "exl3 quantization registered",
                 exl3,
-                "present" if exl3 else "MISSING -> the EXL3 plugin is not installed",
+                "present" if exl3 else "MISSING -> the EXL3 plugin is not installed (pip install 'vllm-exl3>=0.3.1')",
             )
         r.check("vllm location", True, os.path.dirname(origin), fatal=False)
+
+    exl3_spec = importlib.util.find_spec("vllm_exl3") or importlib.util.find_spec("glm53_exl3_plugin")
+    r.check(
+        "vllm-exl3 plugin",
+        exl3_spec is not None,
+        "installed" if exl3_spec else "MISSING -> pip install 'vllm-exl3>=0.3.1'",
+    )
 
     try:
         import exllamav3_ext

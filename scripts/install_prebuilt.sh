@@ -58,6 +58,9 @@ echo "Installing runtime wheels"
 # FlashInfer is a normal published wheel; no patching needed.
 "$PYTHON" -m pip install --pre --upgrade "flashinfer-python==0.6.18rc10"
 
+# Canonical routed-expert EXL3 plugin with native Blackwell sm_121 kernels
+"$PYTHON" -m pip install "vllm-exl3>=0.3.1"
+
 echo
 "$PYTHON" "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/preflight.py" || {
   echo "Preflight failed after install. Report this with the output above." >&2

@@ -45,6 +45,10 @@ def main() -> None:
     print("vllm", vllm.__version__)
     print("exllamav3", version("exllamav3"))
     print("flashinfer-python", version("flashinfer-python"))
+    try:
+        print("vllm-exl3", version("vllm-exl3"))
+    except Exception:
+        print("vllm-exl3: installed (metadata unavailable)")
     print("exl3_moe concurrency", exllamav3_ext.exl3_moe_max_concurrency(0))
 
 

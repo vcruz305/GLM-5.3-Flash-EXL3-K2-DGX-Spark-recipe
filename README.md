@@ -33,9 +33,10 @@ Install the prebuilt runtime, download the Hub pack, and run `vllm serve`. Start
 |---|---|
 | **Runtime** | [vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm) — prebuilt wheels, install in minutes |
 | **Pack** | [vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2) — 120 shards, 91.017 GiB |
+| **Plugin** | [vcruz305/vllm-exl3 >= 0.3.1](https://github.com/vcruz305/vllm-exl3/releases/tag/v0.3.1): canonical EXL3 quantization plugin (`--quantization exl3`) with native sm_121 Blackwell fused MoE and Super Fat GEMM prefill |
 | **This repo** | install scripts, serve flags, and [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md) |
 | Source | [zai-org/GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash) BF16 |
-| Engine | vLLM, `--quantization exl3`, TP=1. **Stock vLLM cannot load this pack** |
+| Engine | vLLM + vllm-exl3 >= 0.3.1, `--quantization exl3`, TP=1. **Stock vLLM cannot load this pack** |
 | Spec | **native MTP k=2** (in the checkpoint). Do not mix with a DFlash sidecar |
 
 Jump: **[Agent instructions](AGENTS.md)** · [Headline](#headline-what-is-verified) · [Install vLLM](#1-install-vllm) · [Download](#2-download-the-pack) · [Serve](#3-serve) · [Smoke](#4-identity-smoke) · [Speed](#speed-leaderboard-same-prompt) · [Why 8k](#why-speed-ranks-are-at-8k) · [Ctx ladder](#context-ladder) · [Sixcat](#sixcat-051) · [Full eval report](docs/SIXCAT.md) · [Pitfalls](#failures-already-paid-for)
@@ -176,10 +177,16 @@ bash scripts/install_prebuilt.sh
 ```
 
 That installs CUDA 13 PyTorch if needed, the patched vLLM and ExLlamaV3 wheels,
-FlashInfer, and the routed-expert EXL3 plugin, then reruns preflight. The wheels
+FlashInfer, and the canonical routed-expert `vllm-exl3 >= 0.3.1` plugin, then reruns preflight. The wheels
 are `aarch64` + Python 3.12 + CUDA 13 and carry compiled CUDA extensions, so they
-are not portable to another architecture or Python minor version. FlashInfer
-JIT-compiles its kernels, so the CUDA 13 toolkit's `nvcc` must be on PATH when
+are not portable to another architecture or Python minor version.
+
+To install or upgrade the canonical plugin directly:
+```bash
+pip install "vllm-exl3>=0.3.1"
+```
+
+FlashInfer JIT-compiles its kernels, so the CUDA 13 toolkit's `nvcc` must be on PATH when
 the server starts (`/usr/local/cuda-13.0/bin`); preflight checks it and the serve
 script adds it. Without it engine init fails with `No valid attention backend
 found for cuda`.
@@ -189,7 +196,7 @@ found for cuda`.
 
 `scripts/install_local_runtime.sh` builds the same runtime from the pinned vLLM
 and ExLlamaV3 revisions, applies the SM121 NoPE sparse-MLA and DFlash
-auxiliary-state fixes, and installs the plugin. Budget tens of minutes at best
+auxiliary-state fixes, and installs `vllm-exl3 >= 0.3.1`. Budget tens of minutes at best
 and hours on a cold machine; the vLLM build alone was about 22 minutes with
 `MAX_JOBS=12`.
 

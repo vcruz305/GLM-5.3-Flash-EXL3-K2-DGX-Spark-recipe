@@ -88,7 +88,7 @@ export MAX_JOBS NVCC_THREADS
 "$PYTHON" "$RECIPE_ROOT/scripts/patch_kpool_tail_detector.py" --source "$VLLM_SRC"
 "$PYTHON" -m pip install --no-build-isolation --editable "$VLLM_SRC"
 "$PYTHON" -m pip install --pre --upgrade "flashinfer-python==0.6.18rc10"
-"$PYTHON" -m pip install --editable "$RECIPE_ROOT/runtime/exl3_plugin"
+"$PYTHON" -m pip install "vllm-exl3>=0.3.1"
 
 "$PYTHON" "$RECIPE_ROOT/scripts/verify_runtime.py"
 echo "Local runtime ready: $VENV"

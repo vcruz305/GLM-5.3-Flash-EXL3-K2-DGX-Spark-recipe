@@ -41,7 +41,7 @@ def main() -> None:
         qc["layer_bits"] = layer_bits
         qc["mixed_k_note"] = (
             f"base bits={qc.get('bits')}; layers {layers} are K{args.bits}. "
-            "Requires the glm53_exl3_vllm_plugin with per-layer K support."
+            "Requires the vllm-exl3 plugin (>=0.3.1) with per-layer K support."
         )
         p.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
         touched.append(name)

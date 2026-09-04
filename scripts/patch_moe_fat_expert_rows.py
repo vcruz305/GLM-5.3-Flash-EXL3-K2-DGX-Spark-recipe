@@ -19,8 +19,12 @@ import sys
 
 def resolve_default():
     import os
-    import glm53_exl3_plugin
-    return os.path.join(os.path.dirname(glm53_exl3_plugin.__file__), "exl3.py")
+    try:
+        import vllm_exl3
+        return os.path.join(os.path.dirname(vllm_exl3.__file__), "exl3.py")
+    except ImportError:
+        import glm53_exl3_plugin
+        return os.path.join(os.path.dirname(glm53_exl3_plugin.__file__), "exl3.py")
 
 
 path = sys.argv[1] if len(sys.argv) > 1 else resolve_default()
