@@ -186,6 +186,13 @@ To install or upgrade the canonical plugin directly:
 pip install "vllm-exl3>=0.3.1"
 ```
 
+This recipe was measured with `vllm-exl3` 0.3.x. The `v0.3.1` tag's `exl3.py`
+does not import (a module docstring sits above `from __future__ import
+annotations`); use the `v0.3.0` tag or install from `main` instead. `main`
+now carries the unreleased `0.4.0`, with native ExLlamaV3 pack support and
+the fixes listed in [vllm-exl3's CHANGELOG](https://github.com/vcruz305/vllm-exl3/blob/main/CHANGELOG.md);
+a `0.4.0` release will follow.
+
 FlashInfer JIT-compiles its kernels, so the CUDA 13 toolkit's `nvcc` must be on PATH when
 the server starts (`/usr/local/cuda-13.0/bin`); preflight checks it and the serve
 script adds it. Without it engine init fails with `No valid attention backend
@@ -620,6 +627,13 @@ Three pieces, and you need all three:
 | [**GLM-5.3-Flash-EXL3-K2**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2) | standard K2 pack (pure 2-bit routed experts, 120 shards, 91.017 GiB) |
 | [**GLM-5.3-Flash-EXL3-K2K3-mix**](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix) | mixed K2/K3 pack (six layers at K3, 2.14 bpw effective, 120 shards); natively supported by this same recipe |
 | **this repo** | preflight, install, serve, bench, and the measurement log for both packs |
+
+### Related recipes
+
+| Recipe | Role |
+|---|---|
+| [DeepSeek-V4-Flash-Vision-EXL3-MixedK-DGX-Spark-recipe](https://github.com/vcruz305/DeepSeek-V4-Flash-Vision-EXL3-MixedK-DGX-Spark-recipe) | sibling recipe on the same plugin: DeepSeek-V4-Flash Vision, mixed-bit routed experts, one Spark |
+| [Qwen3.8-Flash-Next-EXL3-DGX-Spark-recipe](https://github.com/vcruz305/Qwen3.8-Flash-Next-EXL3-DGX-Spark-recipe) | sibling recipe on the same plugin: Qwen3.8-Flash-Next, native ExLlamaV3 pack (3.05bpw), one Spark |
 
 ## Credits and upstream work
 
