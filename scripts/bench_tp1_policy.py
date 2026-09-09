@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Benchmark a running OpenAI-compatible GLM TP1 server and write a policy receipt.
 
-This intentionally uses only the Python standard library for HTTP/SSE.  Run it
+This intentionally uses only the Python standard library for HTTP/SSE. Run it
 against the same loaded checkpoint while changing one EXL3 policy variable at a
-time.  It records local runtime diagnostics so benchmark numbers cannot become
+time. It records local runtime diagnostics so benchmark numbers cannot become
 detached from the actual dispatch configuration.
 """
 
@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import platform
 import statistics
+import sys
 import time
 from urllib.request import Request, urlopen
 
@@ -57,15 +58,21 @@ def local_runtime() -> dict[str, object]:
         info["vllm_exl3_version"] = importlib.metadata.version("vllm-exl3")
     except importlib.metadata.PackageNotFoundError:
         info["vllm_exl3_version"] = None
+
+    ref_marker = Path(sys.prefix) / ".vllm-exl3-candidate-ref"
+    if ref_marker.is_file():
+        candidate_ref = ref_marker.read_text(encoding="utf-8").strip()
+        info["vllm_exl3_candidate_ref"] = candidate_ref or None
+    else:
+        info["vllm_exl3_candidate_ref"] = None
+
     try:
         from vllm_exl3 import runtime_diagnostics
-
         info["vllm_exl3_policy"] = runtime_diagnostics()
-    except Exception as exc:  # receipt should survive a remote-only client
+    except Exception as exc:
         info["vllm_exl3_policy_error"] = repr(exc)
     try:
         import torch
-
         info["torch"] = str(torch.__version__)
         info["torch_cuda"] = torch.version.cuda
         if torch.cuda.is_available():
@@ -86,12 +93,7 @@ def stream_once(url: str, model: str, prompt: str, max_tokens: int, timeout: flo
         "stream": True,
         "stream_options": {"include_usage": True},
     }
-    req = Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    req = Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
     started = time.perf_counter()
     first_content_at: float | None = None
     finished_at = started
@@ -126,12 +128,9 @@ def stream_once(url: str, model: str, prompt: str, max_tokens: int, timeout: flo
         raise RuntimeError("stream completed without a content token")
     wall = finished_at - started
     decode_wall = max(finished_at - first_content_at, 1e-9)
-    completion_tokens = None
-    prompt_tokens = None
-    if usage:
-        completion_tokens = usage.get("completion_tokens")
-        prompt_tokens = usage.get("prompt_tokens")
-    decode_tps = (float(completion_tokens) / decode_wall) if completion_tokens is not None else None
+    completion_tokens = usage.get("completion_tokens") if usage else None
+    prompt_tokens = usage.get("prompt_tokens") if usage else None
+    decode_tps = float(completion_tokens) / decode_wall if completion_tokens is not None else None
     return {
         "ttft_s": first_content_at - started,
         "wall_s": wall,
@@ -182,10 +181,9 @@ def main() -> int:
         print(f"run {i + 1}/{args.runs}")
         result = stream_once(args.url, args.model, prompt, args.max_tokens, args.timeout)
         runs.append(result)
-        print(
-            f"  TTFT={result['ttft_s']:.3f}s wall={result['wall_s']:.3f}s "
-            f"decode={result['decode_tok_s'] if result['decode_tok_s'] is not None else 'usage-unavailable'} tok/s"
-        )
+        decode = result["decode_tok_s"]
+        decode_text = "usage-unavailable" if decode is None else f"{float(decode):.3f}"
+        print(f"  TTFT={result['ttft_s']:.3f}s wall={result['wall_s']:.3f}s decode={decode_text} tok/s")
 
     now = datetime.now(timezone.utc)
     receipt = {
