@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # Install the tested runtime from prebuilt wheels. Minutes, not hours.
 #
-# This is the default install path. scripts/install_local_runtime.sh builds the
-# same runtime from source and is only needed if you are changing the patches
-# or running on a Python/CUDA combination these wheels were not built for.
+# This is the stable/default install path. For unreleased vllm-exl3 development
+# builds used by policy/kernel experiments, run scripts/install_candidate_plugin.sh
+# after this script so the experiment is pinned to an exact Git commit.
 set -euo pipefail
 
 VENV="${VENV:-${HOME}/venvs/glm53-exl3-local}"
 WHEEL_DIR="${WHEEL_DIR:-${HOME}/glm53-runtime-wheels}"
 WHEEL_REPO="${WHEEL_REPO:-vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm}"
 TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu130}"
-VLLM_EXL3_VERSION="${VLLM_EXL3_VERSION:-0.4.2}"
 
+# These wheels contain compiled CUDA extensions. They are not portable across
+# architecture or Python minor version, so refuse early rather than fail deep
+# inside an import.
 if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "These wheels are aarch64 (DGX Spark / GB10). Got $(uname -m)." >&2
   echo "On another architecture, build from source: scripts/install_local_runtime.sh" >&2
@@ -33,6 +35,8 @@ fi
 
 "$PYTHON" -m pip install --quiet --upgrade pip
 
+# PyTorch stays a separate install: its distribution channel changes
+# independently of this recipe, and the CUDA 13 build is a hard requirement.
 if ! "$PYTHON" -c 'import torch' >/dev/null 2>&1; then
   echo "Installing CUDA 13 PyTorch"
   "$PYTHON" -m pip install --index-url "$TORCH_INDEX" \
@@ -51,10 +55,14 @@ fi
 echo "Installing runtime wheels"
 "$PYTHON" -m pip install "${WHEEL_DIR}"/*.whl
 
+# FlashInfer is a normal published wheel; no patching needed.
 "$PYTHON" -m pip install --pre --upgrade "flashinfer-python==0.6.18rc10"
 
-echo "Installing vllm-exl3==${VLLM_EXL3_VERSION}"
-"$PYTHON" -m pip install "vllm-exl3==${VLLM_EXL3_VERSION}"
+# Canonical routed-expert EXL3 plugin with native Blackwell sm_121 kernels.
+# Preserve the recipe's previously tested stable behavior here; development
+# experiments use the exact-ref candidate installer instead of pretending an
+# unreleased version is published.
+"$PYTHON" -m pip install "vllm-exl3>=0.3.1"
 
 echo
 "$PYTHON" "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/preflight.py" || {
@@ -63,5 +71,5 @@ echo
 }
 echo
 echo "Runtime ready: ${VENV}"
-echo "Pinned vllm-exl3: ${VLLM_EXL3_VERSION}"
 echo "Next: bash scripts/download_weights.sh"
+echo "Development candidate: bash scripts/install_candidate_plugin.sh"
