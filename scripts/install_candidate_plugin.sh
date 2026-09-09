@@ -7,9 +7,9 @@ set -euo pipefail
 VENV="${VENV:-${HOME}/venvs/glm53-exl3-local}"
 PYTHON="${VENV}/bin/python"
 VLLM_EXL3_REPO="${VLLM_EXL3_REPO:-https://github.com/vcruz305/vllm-exl3.git}"
-# Exact source boundary qualified by this recipe. Override only intentionally,
-# and record the alternate SHA in the benchmark receipt/experiment notes.
-VLLM_EXL3_REF="${VLLM_EXL3_REF:-1afa02c0d29e911aa1bcdd74fb3ad8115d0e06d9}"
+# Exact source boundary qualified by this recipe. Override only intentionally.
+VLLM_EXL3_REF="${VLLM_EXL3_REF:-28041c423a81fe033e7128d8888e3762fb914910}"
+REF_RECEIPT="${VENV}/.vllm-exl3-candidate-ref"
 
 if [[ ! -x "$PYTHON" ]]; then
   echo "missing ${PYTHON}; run bash scripts/install_prebuilt.sh first" >&2
@@ -29,9 +29,6 @@ if ! command -v nvcc >/dev/null 2>&1; then
   exit 1
 fi
 
-# setup.py resolves ExLlamaV3's extension headers from the already-installed
-# runtime package. Build isolation would hide PyTorch/CUDA from the extension
-# build, so this development path intentionally uses the active venv.
 "$PYTHON" - <<'PY'
 import importlib.util
 missing = [name for name in ("torch", "exllamav3") if importlib.util.find_spec(name) is None]
@@ -42,6 +39,7 @@ PY
 echo "Installing vllm-exl3 candidate from exact ref: ${VLLM_EXL3_REF}"
 "$PYTHON" -m pip install --no-build-isolation --force-reinstall \
   "git+${VLLM_EXL3_REPO}@${VLLM_EXL3_REF}"
+printf '%s\n' "$VLLM_EXL3_REF" > "$REF_RECEIPT"
 
 "$PYTHON" - <<PY
 import importlib.metadata, json
