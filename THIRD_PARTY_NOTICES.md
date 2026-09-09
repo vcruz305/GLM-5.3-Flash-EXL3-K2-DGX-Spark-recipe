@@ -1,6 +1,6 @@
 # Third-party notices
 
-This project contains and derives from MIT-licensed work by other authors, whose copyright and permission notices are reproduced below as those licences require.
+Current recipe work is distributed under **AGPL-3.0-only**. The repository previously used MIT; that historical project license is preserved in `LICENSE.MIT`. This project also contains and derives from MIT-licensed third-party work whose original copyright and permission notices are reproduced below and remain in force for the material they cover.
 
 ---
 

@@ -8,9 +8,7 @@
 > `overlay/exl3.py` of [Mia's AI Lab](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks) ([@MiaAI-Lab](https://github.com/MiaAI-Lab), [@plotarmordev](https://github.com/plotarmordev)), which they published on 2026-08-27, before this repository existed.
 > About **83%** of its substantive lines are shared with theirs.
 >
-> Both projects are MIT licensed. Their notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-> and must be kept with the code. Earlier releases here shipped without those notices, which was our
-> mistake. Thank you to both projects for the work this is built on.
+> The historical upstream code reused here is MIT-licensed. Current recipe work is distributed under **AGPL-3.0-only**; the recipe's prior MIT license is preserved in [LICENSE.MIT](LICENSE.MIT). Full third-party notices remain in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and must stay with the covered code. Thank you to the upstream projects this work builds on.
 
 Reproducible **vLLM** recipe for **[vcruz305/GLM-5.3-Flash-EXL3-K2](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2)** and **[vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix](https://huggingface.co/vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix)** on a **single NVIDIA DGX Spark / GB10 (SM121)**. This recipe directly supports both the standard K2 pack (pure 2-bit routed experts) and the mixed K2/K3 pack (six routed-expert layers at K3, 2.14 bpw effective).
 
