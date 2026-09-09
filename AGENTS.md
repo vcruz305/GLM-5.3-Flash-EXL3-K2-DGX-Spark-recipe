@@ -1,113 +1,49 @@
-# Instructions for coding agents
+# Agent instructions: GLM EXL3 on one GB10
 
-Read this before running anything. It exists because the common failure here
-costs hours: an agent installs stock vLLM, downloads 91 GiB, and only then finds
-that the runtime cannot load the model.
+Use this guide and [README.md](README.md) for current instructions. The archived README and dated measurement reports are historical evidence, not commands to execute indiscriminately.
 
-## The one thing to get right
+## Scope and source of truth
 
-**Never run `pip install vllm`.** Stock vLLM cannot serve this pack. It has:
+This recipe targets `vcruz305/GLM-5.3-Flash-EXL3-K2` and `vcruz305/GLM-5.3-Flash-EXL3-K2K3-mix` on one NVIDIA GB10 / SM121, TP=1. Set `MODEL_DIR` explicitly and record the selected checkpoint revision, config, index and template hashes. Reuse existing shards; do not assume both quants have identical sizes.
 
-- no `exl3` quantization method, so `--quantization exl3` is rejected
-- no `Glm5Next` architecture, so the config will not map to a model class
+The active plugin lives in [vcruz305/vllm-exl3](https://github.com/vcruz305/vllm-exl3). `runtime/exl3_plugin/` is historical provenance. Do not patch that copy and mistake it for the installed candidate.
 
-Neither is a flag, an extra, or a version away. `glm5next` lives in a fork and
-EXL3 comes from this repo's out-of-tree plugin. If you find yourself
-troubleshooting "vLLM lacks EXL3 and glm5next", you installed the wrong vLLM;
-stop and install the runtime below.
+The current executable candidate is `d3cfd394920360d69f820d2dc96f8292a9e10283` (development metadata `0.4.2`). The pre-SUH-cache control is `28041c423a81fe033e7128d8888e3762fb914910`. Both have the per-bit policy; their comparison isolates the cache change, not the entire development line. Preserve the original working installed wheel/revision as a separate baseline.
 
-## K-pool tail bug: fixed in the 2026-08-30 wheels
+## Preserve the working system
 
-Wheels published before 2026-08-30 write GLM-5.3's K-pool tail cache out of
-bounds on long generations (engine death or silent attention corruption).
-Reinstall with `bash scripts/install_prebuilt.sh`. To verify a build yourself,
-serve with `ENFORCE_EAGER=1 GLM_KPOOL_TAIL_BOUNDS=1` and run `scripts/soak.sh`;
-the detector only counts in eager mode. Details: `docs/KPOOL_TAIL_BUG.md`.
+Verify the authorized machine, active processes, CUDA capability, disk and unified-memory headroom before changing anything. Do not rent, restart, destroy or resize an instance, alter system drivers or swap policy, delete checkpoints, or stop unrelated processes as part of a plugin qualification. Restart only the experiment's serving process when needed.
 
-## Order of operations
+Keep a rollback wheel/source revision and dependency manifest. Never overwrite local uncommitted work or publish secrets, hostnames, credentials or raw environment dumps. Use an allowlist for environment capture and sanitize logs before publication.
 
-```bash
-python scripts/preflight.py          # seconds. Do this FIRST, before anything else.
-bash scripts/install_prebuilt.sh     # minutes. Prebuilt wheels, no compiler.
-bash scripts/download_weights.sh     # 91 GiB. Only after preflight passes.
-python scripts/patch_chat_template_thinking.py ~/models/GLM-5.3-Flash-EXL3-K2/chat_template.jinja
-SPEC_METHOD=mtp MTP_TOKENS=2 MAX_MODEL_LEN=8192 GPU_MEM_UTIL=0.87 bash scripts/serve_one_spark.sh
-```
+## Runtime requirements and order
 
-`scripts/preflight.py` exits non-zero and prints the fix. Treat a non-zero exit
-as a hard stop, not as something to work around.
+The prebuilt path expects aarch64, GB10 capability 12.1, Python 3.12 and PyTorch 2.13.0+cu130. CUDA 13 `nvcc`, the active venv's `bin/`, `ninja`, and compiled ExLlamaV3 must resolve. **Do not install stock vLLM** to fix a missing EXL3/Glm5Next integration.
 
-## Do not build from source unless you mean to
+For an existing runtime, activate it and run `python scripts/preflight.py` first. Diagnose a nonzero result before proceeding. For a fresh environment only, use `scripts/install_prebuilt.sh`, activate the resulting venv, and rerun preflight before downloading weights. Its floating plugin dependency is not a reproducible A/B baseline: record resolved artifacts and verify imports.
 
-`scripts/install_local_runtime.sh` compiles vLLM and ExLlamaV3. It takes tens of
-minutes at best and hours on a cold machine. It is for changing the patches, or
-for a Python or CUDA combination the wheels do not cover. It is not the normal
-path and an agent should not reach for it to "fix" an import error.
+Run `scripts/install_candidate_plugin.sh` only after preserving the baseline and checking native build prerequisites. Rebuild the plugin alone when possible; do not rebuild the entire vLLM/ExLlamaV3 stack unnecessarily. Verify the actual imported Python and native-extension paths, ABI and hashes. The candidate-ref marker alone can be stale and does not identify a live worker.
 
-## Hard requirements
+## Qualification rules
 
-The prebuilt wheels carry compiled CUDA extensions, so these are not negotiable:
+Follow [docs/TP1_POLICY_AB.md](docs/TP1_POLICY_AB.md). The schema-1 benchmark/comparison helpers have known timing and provenance gaps listed there; correct/validate the measurement path before using results for promotion.
 
-| Requirement | Value |
-|---|---|
-| Architecture | `aarch64` |
-| GPU | GB10, compute capability 12.1 (SM121) |
-| Python | 3.12 |
-| PyTorch | 2.13.0+cu130 (CUDA 13) |
+Start at 8K, TP=1, FP8 KV, native MTP k=2, `MAX_NUM_SEQS=1`, and `MAX_NUM_BATCHED_TOKENS=2048`. Use `HOST=127.0.0.1`. Keep `EXL3_FUSED_MOE=1`, no Marlin override, and no DFlash sidecar. Run a matched no-spec control separately. Disable prefix caching for cold-prefix TTFT; cached-prefix tests are separate. Keep allocator, template, sampling and memory policy identical within each A/B pair.
 
-On anything else, build from source and expect to fix things.
+Do not confuse configured backend/caps with executed kernels. Capture actual native/fallback dispatch and MTP verification row shapes. Never force unsupported calls past contract checks.
 
-## Things that look like bugs and are not
+`VLLM_EXL3_GROUPED_PREFILL=1` enables planning/diagnostics only: there is no grouped CUDA executor. `VLLM_EXL3_FUSED_TEMP_ROWS` is a request only: the allocation override is inactive and actual capacity remains 2048. Neither is a measured optimization. The existing tiled fat kernel is K4-gated; its microbenchmarks are not K2/K3 grouped-prefill results.
 
-- **~12 minutes per server start.** The checkpoint is 91 GiB. Every flag change
-  is a fresh load. Budget for it rather than assuming a hang.
-- **9.6 to 9.8 tok/s with no speculation.** That is the floor, not a missing
-  kernel. Use MTP k=2.
-- **A pip conflict on `flashinfer-python`.** vLLM's metadata pins 0.6.17; this
-  recipe runs 0.6.18rc10, which is what every measurement was taken on. The
-  warning is expected. Do not downgrade to silence it.
-- **`hf download --resume-download`.** The flag does not exist. `--local-dir`
-  already resumes. Never `--force-download` a partial destination.
-- **`scheduled_spec_decode_tokens=[-1, ...]`** in a scheduler dump is shape
-  padding for the first speculative step, not corruption.
+The SUH cache assumes loaded rotations remain immutable. Verify normal load-time and direct-call lazy-cache paths; rebuild fused state after any rotation/weight changes rather than reusing stale metadata.
 
-## Choices already measured, do not re-litigate
+## Context and historical caveats
 
-- Speculation: **native MTP k=2**. Never pass MTP and a DFlash draft together.
-- MoE: `EXL3_FUSED_MOE=1`. Do **not** pass `--moe-backend marlin`.
-- KV: `--kv-cache-dtype fp8`. Sequences: `--max-num-seqs 1` with speculation.
-- Serving context: **65536**. 131072 allocates but a prompt at or above 98,304
-  tokens faults and kills the engine.
+Earlier 98,304-token faults are historical K-pool bugs, not the current universal limit. The 258,048-token historical result required a particular configuration and an unshipped indexer workspace patch; do not claim this checkout alone reproduces it. Start with 8K, then 32K/64K as headroom allows. Keep `TEMP_ROWS_FUSED=2048` and the launcher's allocator policy. Monitor host `MemAvailable`, swap and request progress; a responsive `/health` is not proof that generation is progressing.
 
-Full numbers and the reasoning are in [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md).
+The K-pool bounds detector requires eager mode. Run detector/eager checks separately from graph-mode speed measurements and retain the exact settings. Respect existing FlashInfer/runtime pins; a known metadata conflict is not permission to upgrade dependencies during A/B testing.
 
-## nvcc must be on PATH
+## Reporting and promotion
 
-vLLM's `has_flashinfer()` returns False without `nvcc` on PATH and then rejects the only sparse-MLA backend for GB10 (`No valid attention backend found for cuda ... FLASHINFER_MLA_SPARSE_SM120`). `scripts/serve_one_spark.sh` adds `/usr/local/cuda-13.0/bin` itself and `scripts/preflight.py` checks it; if you launch `vllm serve` by hand, `export PATH=/usr/local/cuda-13.0/bin:$PATH` first. FlashInfer's JIT also runs `ninja` from the venv's `bin/`, so activate the venv (or put `~/venvs/glm53-exl3-local/bin` on PATH) rather than calling the venv's python by absolute path from a bare shell.
+Retain exact source/artifact identity, requests, full responses, token counts, finish reasons, errors, timing formulas, dispatch evidence, MTP metrics, memory and raw logs. Report skipped GPU tests as unqualified, not passed. Keep aggregate throughput separate from per-request speed and historical results separate from the new candidate.
 
-## Context limits (measured 2026-08-31, updated 2026-09-01)
-
-`MAX_MODEL_LEN=262144` boots (KV pool 1.09M tokens on K2) and prompts up to
-**163,479 tokens are verified** with perfect needle recall (prefill ~590 tok/s,
-decode ~17–20 tok/s). The 163k-180k wedge (fused-MoE fat-expert fallback) is
-fixed by the `TEMP_ROWS_FUSED` row cap below. A second, independent wedge past
-roughly 200k-230k prompt tokens, an allocator ratchet on GB10 unified memory
-in vLLM's sparse-indexer chunked prefill, is fixed by
-`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, which
-`scripts/serve_one_spark.sh` now sets by default; it is **required** for
-prefills above ~200k tokens on one Spark. A cold 258,048-token prefill is
-verified passing with that flag set (single request, pinned 3 GiB KV pool,
-speculative decoding off). See docs/IMPROVEMENTS_AND_EVIDENCE.md section 0b
-and the README's long-context section.
-
-Also field-verified: a root-owned `~/.triton/cache` (from an earlier sudo run)
-breaks the user-mode serve; chown it or set `TRITON_CACHE_DIR` to a writable dir.
-
-## Plugin home (updated 2026-09-01)
-The EXL3 plugin's canonical home is https://github.com/vcruz305/vllm-exl3
-(package `vllm_exl3`; `glm53_exl3_plugin` remains as a compat shim). The copy
-under `runtime/exl3_plugin/` is provenance only — make plugin changes in the
-vllm-exl3 repo and mirror the built wheel to the HF spark-vllm repo, replacing
-the previous wheel (two wheels break `pip install dir/*.whl`). The fat-expert
-row cap `TEMP_ROWS_FUSED` is 2048; 128 caused the >163k prefill stall
-(see docs/IMPROVEMENTS_AND_EVIDENCE.md section 0).
+Use a review branch for test/harness fixes. Do not publish a wheel, move release tags, change production defaults or rewrite historical measured results merely because CPU CI is green. Preserve upstream notices and actual code/design provenance; never claim source-level reuse is independent implementation.
