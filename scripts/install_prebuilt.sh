@@ -10,7 +10,7 @@ VENV="${VENV:-${HOME}/venvs/glm53-exl3-local}"
 WHEEL_DIR="${WHEEL_DIR:-${HOME}/glm53-runtime-wheels}"
 WHEEL_REPO="${WHEEL_REPO:-vcruz305/GLM-5.3-Flash-EXL3-K2-spark-vllm}"
 TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu130}"
-VLLM_EXL3_VERSION="${VLLM_EXL3_VERSION:-0.4.1}"
+VLLM_EXL3_VERSION="${VLLM_EXL3_VERSION:-0.4.2}"
 
 if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "These wheels are aarch64 (DGX Spark / GB10). Got $(uname -m)." >&2
