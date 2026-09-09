@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import platform
 import shutil
@@ -93,7 +94,6 @@ def main() -> int:
         else:
             r.check("CUDA available", False, "torch.cuda.is_available() is False")
 
-    # The two checks that the three-hour failure mode is actually about.
     vllm_spec = importlib.util.find_spec("vllm")
     if vllm_spec is None:
         r.check("vllm importable", False, "not installed")
@@ -119,7 +119,7 @@ def main() -> int:
             r.check(
                 "exl3 quantization registered",
                 exl3,
-                "present" if exl3 else "MISSING -> the EXL3 plugin is not installed (pip install 'vllm-exl3>=0.3.1')",
+                "present" if exl3 else "MISSING -> install the pinned vllm-exl3 version from this recipe",
             )
         r.check("vllm location", True, os.path.dirname(origin), fatal=False)
 
@@ -127,8 +127,34 @@ def main() -> int:
     r.check(
         "vllm-exl3 plugin",
         exl3_spec is not None,
-        "installed" if exl3_spec else "MISSING -> pip install 'vllm-exl3>=0.3.1'",
+        "installed" if exl3_spec else "MISSING -> run scripts/install_prebuilt.sh",
     )
+
+    if exl3_spec is not None:
+        try:
+            import vllm_exl3
+            from importlib.metadata import version
+
+            plugin_version = version("vllm-exl3")
+            r.check("vllm-exl3 version", True, plugin_version, fatal=False)
+            diag = getattr(vllm_exl3, "runtime_diagnostics", None)
+            if callable(diag):
+                runtime = diag()
+                r.check(
+                    "EXL3 runtime policy",
+                    True,
+                    json.dumps(runtime, sort_keys=True, separators=(",", ":")),
+                    fatal=False,
+                )
+            else:
+                r.check(
+                    "EXL3 runtime policy",
+                    True,
+                    "plugin predates runtime_diagnostics(); serving still allowed",
+                    fatal=False,
+                )
+        except Exception as exc:  # noqa: BLE001
+            r.check("EXL3 runtime policy", True, f"diagnostics unavailable: {exc!r}", fatal=False)
 
     try:
         import exllamav3_ext
