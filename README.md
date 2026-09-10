@@ -2,6 +2,10 @@
 
 Serve **GLM-5.3-Flash EXL3 K2 or K2/K3-mix** on a single GB10 using the compatible vLLM fork, ExLlamaV3 and the canonical `vllm-exl3` plugin. The standard recipe uses TP=1 and native MTP k=2. **Stock vLLM is not a replacement for this runtime.**
 
+**Prefer SGLang instead of vLLM for this model?** See the companion
+[`GLM-5.3-Flash-EXL3-K2-SGLang-DGX-Spark-recipe`](https://github.com/vcruz305/GLM-5.3-Flash-EXL3-K2-SGLang-DGX-Spark-recipe)
+(SGLang-based recipe, same model/quant/hardware target).
+
 ## Credits and provenance
 
 The **EXL3 trellis format, codebooks and quantization method** are [ExLlamaV3](https://github.com/turboderp-org/exllamav3) by Turboderp. The original routed-expert integration preserved under `runtime/exl3_plugin/` is substantially derived from the earlier `overlay/exl3.py` by **Mia's AI Lab**, including @plotarmordev, in [GLM-5.3-Flash-EXL3-2x-DGX-Sparks](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks).
